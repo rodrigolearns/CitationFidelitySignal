@@ -481,7 +481,7 @@ class Neo4jClient:
             return problematic_papers
     
     # ============================================================================
-    # Part 5: Deep Impact Analysis Methods
+    # Workflow 5: Impact Assessment Methods
     # ============================================================================
     
     def get_problematic_paper_detail(self, article_id: str) -> Optional[Dict]:
@@ -501,7 +501,7 @@ class Neo4jClient:
                 RETURN a.title as title,
                        a.doi as doi,
                        a.authors as authors,
-                       a.pub_date as pub_date,
+                       a.pub_year as pub_year,
                        a.impact_analysis_json as impact_analysis,
                        a.impact_classification as impact_classification,
                        a.analyzed_at as analyzed_at
@@ -516,13 +516,13 @@ class Neo4jClient:
                 'title': record['title'],
                 'doi': record['doi'],
                 'authors': record['authors'] or [],
-                'pub_date': record['pub_date'],
+                'pub_year': record['pub_year'],
                 'impact_analysis': json.loads(record['impact_analysis']) if record['impact_analysis'] else None,
                 'impact_classification': record['impact_classification'],
                 'analyzed_at': record['analyzed_at']
             }
             
-            # Get all citations (both problematic and non-problematic)
+            # Get all problematic citations
             result = session.run("""
                 MATCH (source:Article {article_id: $article_id})-[c:CITES]->(target:Article)
                 WHERE c.qualified = true
@@ -534,33 +534,29 @@ class Neo4jClient:
                 ORDER BY target.article_id
             """, article_id=article_id)
             
-            citations = []
-            problematic_count = 0
+            problematic_citations = []
             
             for record in result:
                 contexts = json.loads(record['contexts_json']) if record['contexts_json'] else []
                 
-                # Check if any context is problematic
-                is_problematic = False
+                # Extract problematic contexts and flatten them
                 for ctx in contexts:
-                    if ctx.get('classification', {}).get('category') in [
-                        'NOT_SUBSTANTIATE', 'CONTRADICT', 'OVERSIMPLIFY', 'MISQUOTE'
-                    ]:
-                        is_problematic = True
-                        problematic_count += 1
-                
-                citations.append({
-                    'target_id': record['target_id'],
-                    'target_title': record['target_title'],
-                    'target_doi': record['target_doi'],
-                    'contexts': contexts,
-                    'context_count': record['context_count'],
-                    'is_problematic': is_problematic
-                })
+                    classification_data = ctx.get('classification', {})
+                    classification = classification_data.get('category', 'UNKNOWN')
+                    
+                    # Only include problematic classifications
+                    if classification in ['NOT_SUBSTANTIATE', 'CONTRADICT', 'OVERSIMPLIFY', 'MISQUOTE']:
+                        problematic_citations.append({
+                            'target_id': record['target_id'],
+                            'target_title': record['target_title'],
+                            'target_doi': record['target_doi'],
+                            'classification': classification,
+                            'context': ctx.get('context_text', 'No context available'),
+                            'justification': classification_data.get('justification', 'No justification provided'),
+                            'second_round': ctx.get('second_round', {})
+                        })
             
-            paper_metadata['citations'] = citations
-            paper_metadata['total_citations'] = len(citations)
-            paper_metadata['problematic_citations_count'] = problematic_count
+            paper_metadata['problematic_citations'] = problematic_citations
             
             return paper_metadata
     
@@ -570,7 +566,7 @@ class Neo4jClient:
         analysis: Dict
     ) -> bool:
         """
-        Store Part 5 impact analysis results in Neo4j.
+        Store Workflow 5 impact analysis results in Neo4j.
         
         Args:
             article_id: Article ID

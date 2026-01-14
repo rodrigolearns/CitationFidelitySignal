@@ -23,7 +23,7 @@ def get_pipeline_stats(neo4j):
     stats = {}
     
     with neo4j.driver.session() as session:
-        # Part 1: Citation Graph
+        # Workflow 1: Citation Graph
         result = session.run('MATCH (a:Article) RETURN count(a) as total')
         stats['total_articles'] = result.single()['total']
         
@@ -43,7 +43,7 @@ def get_pipeline_stats(neo4j):
         ''')
         stats['referenced_only_articles'] = result.single()['total']
         
-        # Part 2: Qualification & Classification
+        # Workflow 2: Qualification & Classification
         result = session.run('''
             MATCH ()-[c:CITES]->()
             WHERE c.qualified = true
@@ -84,7 +84,7 @@ def get_pipeline_stats(neo4j):
         stats['citation_type_distribution'] = dict(citation_type_dist)
         stats['avg_confidence'] = sum(confidence_scores) / len(confidence_scores) if confidence_scores else 0
         
-        # Part 3: Second-Round Determination (parse JSON in Python)
+        # Workflow 3: Second-Round Determination (parse JSON in Python)
         result = session.run('''
             MATCH ()-[c:CITES]->()
             WHERE c.qualified = true AND c.citation_contexts_json IS NOT NULL
@@ -124,8 +124,8 @@ def print_report(stats):
     print(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("="*70)
     
-    # Part 1
-    print("\n📊 PART 1: CITATION GRAPH")
+    # Workflow 1
+    print("\n📊 WORKFLOW 1: CITATION GRAPH")
     print("-" * 70)
     print(f"  Total Articles: {stats['total_articles']:,}")
     print(f"  Total Citations: {stats['total_citations']:,}")
@@ -133,14 +133,14 @@ def print_report(stats):
     print(f"  Referenced-Only Articles: {stats['referenced_only_articles']:,}")
     
     # Part 2a
-    print("\n📊 PART 2A: EVIDENCE EXTRACTION")
+    print("\n📊 WORKFLOW 2A: EVIDENCE EXTRACTION")
     print("-" * 70)
     print(f"  Qualified Citations: {stats['qualified_citations']:,}")
     print(f"  Citation Contexts: {stats['total_contexts']:,}")
     print(f"  Avg Contexts per Citation: {stats['total_contexts'] / stats['qualified_citations']:.2f}")
     
     # Part 2b
-    print("\n📊 PART 2B: INITIAL CLASSIFICATION")
+    print("\n📊 WORKFLOW 2B: INITIAL CLASSIFICATION")
     print("-" * 70)
     print(f"  Average Confidence: {stats['avg_confidence']:.2%}")
     print("\n  Classification Distribution:")
@@ -157,9 +157,9 @@ def print_report(stats):
         bar = "█" * int(pct / 2)
         print(f"    {ctype:20s}: {count:4d} ({pct:5.1f}%) {bar}")
     
-    # Part 3
+    # Workflow 3
     if stats['second_round_total'] > 0:
-        print("\n📊 PART 3: FINAL DETERMINATION (SECOND-ROUND)")
+        print("\n📊 WORKFLOW 3: FINAL DETERMINATION (SECOND-ROUND)")
         print("-" * 70)
         print(f"  Total Second-Round Reviews: {stats['second_round_total']:,}")
         
@@ -179,7 +179,7 @@ def print_report(stats):
             pct = count / stats['second_round_total'] * 100
             print(f"    {category:20s}: {count:4d} ({pct:5.1f}%)")
     else:
-        print("\n📊 PART 3: FINAL DETERMINATION")
+        print("\n📊 WORKFLOW 3: FINAL DETERMINATION")
         print("-" * 70)
         print("  No second-round reviews conducted yet.")
     

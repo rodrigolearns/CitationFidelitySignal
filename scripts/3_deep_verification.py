@@ -116,10 +116,10 @@ Note: Citations classified as SUPPORT, INCOMPLETE_REFERENCE_DATA,
         except Exception as e:
             logger.warning(f"⚠️  Phase 3 Cleanup failed: {e}")
     
-    # Part 4: Data Analysis & Quality Assessment
+    # Workflow 4: Data Analysis & Quality Assessment
     try:
         logger.info("\n" + "="*70)
-        logger.info("🚀 Starting Part 4: Data Analysis...")
+        logger.info("🚀 Starting Workflow 4: Data Analysis...")
         logger.info("="*70)
         
         # Run analysis script
@@ -132,12 +132,12 @@ Note: Citations classified as SUPPORT, INCOMPLETE_REFERENCE_DATA,
         
         if result.returncode == 0:
             print(result.stdout)
-            logger.info("✅ Part 4 Analysis Complete!")
+            logger.info("✅ Workflow 4 Analysis Complete!")
         else:
-            logger.warning(f"⚠️  Part 4 Analysis had warnings:\n{result.stderr}")
+            logger.warning(f"⚠️  Workflow 4 Analysis had warnings:\n{result.stderr}")
             
     except Exception as e:
-        logger.warning(f"⚠️  Part 4 Analysis failed: {e}")
+        logger.warning(f"⚠️  Workflow 4 Analysis failed: {e}")
         logger.info("   You can run it manually with: python scripts/analyze_results.py")
 
 

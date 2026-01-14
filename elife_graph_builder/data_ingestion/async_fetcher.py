@@ -229,61 +229,61 @@ class AsyncELifeFetcher:
             for v in versions_to_try:
                 url = f"{self.GITHUB_RAW_URL}/elife-{article_id}-v{v}.xml"
                 output_path = self.output_dir / f"elife-{article_id}-v{v}.xml"
-                
-                try:
-                    async with session.get(
-                        url,
-                        headers=self.xml_headers,
-                        timeout=aiohttp.ClientTimeout(total=30)
-                    ) as response:
-                        if response.status == 200:
-                            content = await response.read()
-                            output_path.write_bytes(content)
+            
+            try:
+                async with session.get(
+                    url,
+                    headers=self.xml_headers,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    if response.status == 200:
+                        content = await response.read()
+                        output_path.write_bytes(content)
                             
                             # Validate body content
                             if self.check_xml_body_content(output_path):
-                                self.stats['downloaded'] += 1
-                                self.backoff_delay = 1.0  # Reset backoff on success
-                                if progress_bar:
-                                    progress_bar.update(1)
+                        self.stats['downloaded'] += 1
+                        self.backoff_delay = 1.0  # Reset backoff on success
+                        if progress_bar:
+                            progress_bar.update(1)
                                 logger.debug(f"✓ {article_id}: Downloaded v{v} with body content")
                                 # Small delay to be respectful to GitHub
                                 await asyncio.sleep(0.5)
-                                return output_path
+                        return output_path
                             else:
                                 # No body content, delete and try next version
                                 output_path.unlink()
                                 logger.debug(f"✗ {article_id}: v{v} has no body content, trying next version")
                                 continue
-                        elif response.status == 404:
+                    elif response.status == 404:
                             logger.debug(f"✗ {article_id}: v{v} not found (404)")
                             continue  # Try next version
-                        elif response.status == 429 or response.status == 403:
+                    elif response.status == 429 or response.status == 403:
                             # Rate limited - wait and fail this article
-                            self.stats['rate_limited'] += 1
-                            self.backoff_delay = min(self.backoff_delay * 2, self.max_backoff)
-                            jitter = random.uniform(0, 0.1 * self.backoff_delay)
-                            wait_time = self.backoff_delay + jitter
+                        self.stats['rate_limited'] += 1
+                self.backoff_delay = min(self.backoff_delay * 2, self.max_backoff)
+                jitter = random.uniform(0, 0.1 * self.backoff_delay)
+                wait_time = self.backoff_delay + jitter
                             logger.warning(f"⚠ Rate limited! Backing off {wait_time:.1f}s")
-                            await asyncio.sleep(wait_time)
+                await asyncio.sleep(wait_time)
                             break  # Don't try more versions if rate limited
                         else:
                             logger.debug(f"✗ {article_id}: v{v} HTTP {response.status}")
                             continue
                             
-                except asyncio.TimeoutError:
+            except asyncio.TimeoutError:
                     logger.debug(f"✗ {article_id}: v{v} timeout")
                     continue
-                except Exception as e:
+            except Exception as e:
                     logger.debug(f"✗ {article_id}: v{v} error: {e}")
                     continue
             
             # All versions failed
-            self.stats['failed'] += 1
-            if progress_bar:
-                progress_bar.update(1)
+                self.stats['failed'] += 1
+                if progress_bar:
+                    progress_bar.update(1)
             logger.warning(f"✗ {article_id}: All versions failed or have no body content")
-            return None
+                return None
     
     async def download_batch_async(
         self,

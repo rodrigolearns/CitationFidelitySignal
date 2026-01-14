@@ -8,7 +8,7 @@ qualitative criteria based on centrality and dependence.
 PHASE_B_SYSTEM_PROMPT = """You are a senior scientific integrity analyst writing a comprehensive impact assessment. Your role is to determine whether citation issues affect a paper's scientific validity.
 
 CORE PHILOSOPHY:
-- We know the citations are problematic (Part 2 confirmed this)
+- We know the citations are problematic (Workflow 2 confirmed this)
 - Your job: Assess whether these issues MATTER for the paper's validity
 - Focus on CENTRALITY and DEPENDENCE, not count
 - One critical miscitation > Ten peripheral miscitations
@@ -32,15 +32,15 @@ PHASE_B_USER_PROMPT_TEMPLATE = """You have completed detailed impact analysis of
 
 ---
 
-# CITATION IMPACT ANALYSES FROM STAGE 1
+# CITATION IMPACT ANALYSES FROM PHASE A
 
-{stage1_analyses}
+{phase_a_analyses}
 
 ---
 
 # YOUR TASK: DETERMINE IMPACT ON SCIENTIFIC VALIDITY
 
-## PART 1: IDENTIFY THE PAPER'S MAIN CONTRIBUTION
+## STEP 1: IDENTIFY THE PAPER'S MAIN CONTRIBUTION
 
 Before assessing impact, identify what this paper's PRIMARY contribution is:
 
@@ -58,7 +58,7 @@ Before assessing impact, identify what this paper's PRIMARY contribution is:
 
 ---
 
-## PART 2: MAP CITATIONS TO CLAIMS
+## STEP 2: MAP CITATIONS TO CLAIMS
 
 For each MAIN CLAIM in Results/Discussion:
 1. State the claim (quote from paper)
@@ -73,7 +73,7 @@ For each MAIN CLAIM in Results/Discussion:
 
 ---
 
-## PART 3: PATTERN ANALYSIS
+## STEP 3: PATTERN ANALYSIS
 
 ### A. Section Distribution
 Count where miscitations appear:
@@ -94,7 +94,7 @@ Count where miscitations appear:
 
 ---
 
-## PART 4: OVERALL CLASSIFICATION
+## STEP 4: OVERALL CLASSIFICATION
 
 Choose ONE classification using QUALITATIVE criteria:
 
@@ -142,17 +142,17 @@ All problematic citations are:
 **⚪ FALSE_ALARM** - Use when:
 
 After deep reading, most flagged citations are actually:
-- Acceptable METHODOLOGICAL citations (Part 2 misunderstood type)
+- Acceptable METHODOLOGICAL citations (Workflow 2 misunderstood type)
 - Reasonable paraphrases within scientific norms
 - Not genuinely problematic
 
 **Decision criteria:**
 - After reading original texts, are these citations actually OK?
-- Was Part 2 too strict or misunderstood citation types?
+- Was Workflow 2 too strict or misunderstood citation types?
 
 ---
 
-## PART 5: GENERATE REPORT
+## STEP 5: GENERATE REPORT
 
 Write a comprehensive assessment with these REQUIRED elements:
 
@@ -276,21 +276,21 @@ def format_phase_b_prompt(
     
     Args:
         paper_metadata: Dict with title, authors, doi, total_citations
-        stage1_assessments: List of CitationAssessment objects
+        phase_a_assessments: List of CitationAssessment objects
         problematic_citations_contexts: List of EnrichedCitationContext objects
     
     Returns:
         Tuple of (system_prompt, user_prompt)
     """
-    # Format Stage 1 analyses
-    stage1_text = ""
-    for i, assessment in enumerate(stage1_assessments, 1):
+    # Format Phase A analyses
+    phase_a_text = ""
+    for i, assessment in enumerate(phase_a_assessments, 1):
         # Extract data safely
         impact = assessment.impact_assessment if hasattr(assessment, 'impact_assessment') else 'UNKNOWN'
         role = assessment.citation_role if hasattr(assessment, 'citation_role') else {}
         validity = assessment.validity_impact if hasattr(assessment, 'validity_impact') else {}
         
-        stage1_text += f"""## Citation {i} - Impact Analysis
+        phase_a_text += f"""## Citation {i} - Impact Analysis
 
 **Impact Level:** {impact}
 **Citation Role:** {role.get('type', 'UNKNOWN')} - {role.get('centrality', 'UNKNOWN')}
@@ -322,10 +322,10 @@ Section: {assessment.citing_paper_claim.get('section', 'Unknown')}
         paper_authors=', '.join(paper_metadata.get('authors', [])[:5]),
         paper_doi=paper_metadata.get('doi', 'Unknown'),
         total_citations=paper_metadata.get('total_citations', '?'),
-        problematic_count=len(stage1_assessments),
-        stage1_analyses=stage1_text,
+        problematic_count=len(phase_a_assessments),
+        phase_a_analyses=phase_a_text,
         self_citation_count=self_citation_count,
-        total_problematic=len(stage1_assessments),
+        total_problematic=len(phase_a_assessments),
         same_inst_count=same_inst_count
     )
     

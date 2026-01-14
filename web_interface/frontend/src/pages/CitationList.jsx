@@ -373,8 +373,7 @@ export default function CitationList() {
                       onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fff8e1'}
                       onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'white'}
                       onClick={() => {
-                        // TODO: Navigate to /problematic-paper/{article_id}
-                        console.log('Clicked paper:', paper.article_id)
+                        navigate(`/problematic-paper/${paper.article_id}`)
                       }}
                     >
                       <td style={{ padding: '12px' }}>{idx + 1}</td>

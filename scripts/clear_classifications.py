@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Clear ONLY classification data (Part 2 & 3) while preserving Part 1 data.
+Clear ONLY classification data (Workflow 2 & 3) while preserving Workflow 1 data.
 
-This allows re-running Part 2 and Part 3 with updated code while keeping:
+This allows re-running Workflow 2 and Workflow 3 with updated code while keeping:
 - Graph structure (articles and CITES edges)
 - Citation contexts
 - Evidence segments
 
 What gets cleared:
-- First-round classifications (Part 2)
-- Second-round classifications (Part 3)
+- First-round classifications (Workflow 2)
+- Second-round classifications (Workflow 3)
 - classified and second_round_classified flags
 """
 
@@ -66,11 +66,11 @@ def clear_classifications(
             print("\n✅ WILL KEEP:")
             print("  - Graph structure (articles and CITES edges)")
             print("  - Citation contexts (4-sentence windows)")
-            print("  - Evidence segments (from Part 1)")
+            print("  - Evidence segments (from Workflow 1)")
             print("  - qualified flag and qualification data")
             print("\n❌ WILL CLEAR:")
-            print("  - First-round classifications (Part 2 results)")
-            print("  - Second-round classifications (Part 3 results)")
+            print("  - First-round classifications (Workflow 2 results)")
+            print("  - Second-round classifications (Workflow 3 results)")
             print("  - classified flag")
             print("  - second_round_classified flag")
             print("\n📝 NEXT STEPS AFTER CLEARING:")
@@ -138,7 +138,7 @@ def clear_classifications(
             print("\n" + "=" * 70)
             print(f"✅ Successfully cleared {citations_updated} citations")
             print("=" * 70)
-            print("\nYou can now re-run Part 2 and Part 3 with the new code:")
+            print("\nYou can now re-run Workflow 2 and Workflow 3 with the new code:")
             print("  1. python3 scripts/evaluate_fidelity.py --batch-size 10")
             print("  2. python3 scripts/final_determination.py --batch-size 5")
             print()

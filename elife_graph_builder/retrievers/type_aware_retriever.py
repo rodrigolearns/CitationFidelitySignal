@@ -95,7 +95,7 @@ class TypeAwareEnhancedRetriever:
     """
     Enhanced evidence retriever with citation type-aware section prioritization.
     
-    Uses the citation type detected in Part 2 to apply appropriate section weights,
+    Uses the citation type detected in Workflow 2 to apply appropriate section weights,
     ensuring the LLM receives evidence from the most relevant sections.
     
     Example:

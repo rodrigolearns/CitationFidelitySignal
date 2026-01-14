@@ -316,7 +316,7 @@ class StreamingNeo4jImporter:
     
     def store_impact_analysis(self, article_id: str, analysis_dict: Dict) -> None:
         """
-        Store Part 5 impact analysis results in Neo4j.
+        Store Workflow 5 impact analysis results in Neo4j.
         
         Args:
             article_id: Article ID

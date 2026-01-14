@@ -238,7 +238,7 @@ class SecondRoundClassification(BaseModel):
 
 
 # ============================================================================
-# Part 5: Deep Impact Analysis Models
+# Workflow 5: Deep Impact Analysis Models
 # ============================================================================
 
 class AuthorInfo(BaseModel):
@@ -275,7 +275,7 @@ class EnrichedCitationContext(BaseModel):
 
 
 class CitationAssessment(BaseModel):
-    """Stage 1 output: Deep reading assessment of a single citation."""
+    """Phase A output: Deep reading assessment of a single citation."""
     
     citation_id: int
     impact_assessment: str  # HIGH_IMPACT, MODERATE_IMPACT, LOW_IMPACT, FALSE_POSITIVE
@@ -325,7 +325,7 @@ class RelationshipPatterns(BaseModel):
 
 
 class CombinedImpactAnalysis(BaseModel):
-    """Stage 2 output: Combined pattern analysis and impact report."""
+    """Phase B output: Combined pattern analysis and impact report."""
     
     # Pattern Analysis (nested as per prompt)
     pattern_analysis: Dict  # Contains section_distribution, claim_impact_map, relationship_patterns, severity_assessment
@@ -348,9 +348,9 @@ class ProblematicPaperAnalysis(BaseModel):
     problematic_citations_count: int
     total_citations_count: int
     
-    # Stage outputs
-    stage1_deep_reading: List[CitationAssessment] = Field(default_factory=list)
-    stage2_combined_analysis: Optional[CombinedImpactAnalysis] = None
+    # Phase outputs
+    phase_a_assessments: List[CitationAssessment] = Field(default_factory=list)
+    phase_b_analysis: Optional[CombinedImpactAnalysis] = None
     
     # Final classification
     overall_classification: str  # CRITICAL/MODERATE/MINOR/FALSE_ALARM

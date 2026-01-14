@@ -57,7 +57,50 @@ class ImpactAssessmentWorkflow:
             Config.NEO4J_PASSWORD
         )
         
+        # Set up logging with dedicated file
         self.logger = logging.getLogger(__name__)
+        self._setup_logging()
+    
+    def _setup_logging(self):
+        """Set up dedicated log file for Workflow 5 that captures ALL components."""
+        from datetime import datetime
+        
+        # Create logs directory if it doesn't exist
+        log_dir = Path("logs")
+        log_dir.mkdir(exist_ok=True)
+        
+        # Create log file with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file = log_dir / f"workflow5_impact_assessment_{timestamp}.log"
+        
+        # Configure file handler
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        
+        # Create formatter
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(formatter)
+        
+        # Get the ROOT logger for the entire elife_graph_builder package
+        # This ensures ALL loggers in this package write to the file
+        root_package_logger = logging.getLogger('elife_graph_builder')
+        root_package_logger.addHandler(file_handler)
+        root_package_logger.setLevel(logging.DEBUG)
+        
+        # Also add to this specific logger
+        self.logger.addHandler(file_handler)
+        self.logger.setLevel(logging.DEBUG)
+        
+        # Write initial log message
+        self.logger.info("=" * 80)
+        self.logger.info(f"📝 Workflow 5: Impact Assessment - Log Started")
+        self.logger.info(f"Log file: {log_file}")
+        self.logger.info("=" * 80)
+        
+        self.log_file = log_file
     
     def analyze_paper(self, article_id: str) -> ProblematicPaperAnalysis:
         """
@@ -101,8 +144,8 @@ class ImpactAssessmentWorkflow:
                 citing_paper_metadata=data['paper_metadata'],
                 problematic_citations_count=len(data['problematic_citations']),
                 total_citations_count=data['total_citations'],
-                stage1_deep_reading=phase_a_assessments,
-                stage2_combined_analysis=phase_b_analysis,
+                phase_a_assessments=phase_a_assessments,
+                phase_b_analysis=phase_b_analysis,
                 overall_classification=phase_b_analysis.overall_classification,
                 report_generated_at=data['timestamp'],
                 model_used="deepseek-chat/deepseek-reasoner"

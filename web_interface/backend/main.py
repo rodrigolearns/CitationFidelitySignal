@@ -1,8 +1,19 @@
 """FastAPI backend for eLife Citation Qualification Viewer."""
+import sys
+from pathlib import Path
+
+# Add project root to Python path
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from neo4j_client import Neo4jClient
+
+# Import workflow components at startup (so .env is loaded before any requests)
+from elife_graph_builder.impact_assessment import ImpactAssessmentWorkflow
+from elife_graph_builder.config import Config
 
 # Global Neo4j client
 neo4j_client = None
@@ -120,13 +131,13 @@ async def get_problematic_papers():
 @app.get("/api/problematic-paper/{article_id}")
 async def get_problematic_paper_detail(article_id: str):
     """
-    Get detailed information about a problematic paper (Part 5).
+    Get detailed information about a problematic paper.
     
     Args:
         article_id: Article ID of the problematic citing paper
     
     Returns:
-        Paper metadata, all citations, and impact analysis (if available)
+        Paper metadata, all citations, and Workflow 5 impact analysis (if available)
     """
     try:
         paper_data = neo4j_client.get_problematic_paper_detail(article_id)
@@ -144,11 +155,11 @@ async def get_problematic_paper_detail(article_id: str):
 @app.post("/api/problematic-paper/{article_id}/analyze")
 async def analyze_problematic_paper(article_id: str):
     """
-    Trigger Part 5 deep impact analysis for a problematic paper.
+    Trigger Workflow 5: Impact Assessment for a problematic paper.
     
-    This is a long-running operation (~35-50 seconds) that performs:
-    1. Stage 1: Deep reading analysis with GPT-5.2
-    2. Stage 2: Pattern analysis + report generation
+    This is a long-running operation (~2-3 minutes with DeepSeek batching) that performs:
+    - Phase A: Citation Analysis - Deep reading of full papers
+    - Phase B: Synthesis & Reporting - Pattern detection and comprehensive report
     
     Args:
         article_id: Article ID to analyze
@@ -157,20 +168,87 @@ async def analyze_problematic_paper(article_id: str):
         Complete impact analysis with classification and report
     """
     try:
-        from pathlib import Path
-        import sys
+        import aiohttp
         
-        # Add project root to path
-        project_root = Path(__file__).parent.parent.parent
-        sys.path.insert(0, str(project_root))
+        # Check if any version of the XML exists
+        samples_dir = Config.SAMPLES_DIR
+        xml_found = False
         
-        from elife_graph_builder.impact_pipeline import DeepImpactPipeline
+        print(f"🔍 Checking for cached XML for article {article_id}...")
         
-        # Create pipeline
-        pipeline = DeepImpactPipeline(use_batch_api=True)
+        # Check for versioned XMLs (elife-XXXXX-v1.xml, etc.)
+        for version in [6, 5, 4, 3, 2, 1]:
+            versioned_xml = samples_dir / f"elife-{article_id}-v{version}.xml"
+            if versioned_xml.exists():
+                # Create copy to expected name
+                expected_xml = samples_dir / f"elife-{article_id}.xml"
+                if not expected_xml.exists():
+                    import shutil
+                    shutil.copy(versioned_xml, expected_xml)
+                    print(f"✅ Using cached v{version}")
+                xml_found = True
+                break
         
-        # Run analysis
-        result = pipeline.analyze_paper(article_id)
+        # If no XML exists, download it
+        if not xml_found:
+            expected_xml = samples_dir / f"elife-{article_id}.xml"
+            if not expected_xml.exists():
+                print(f"📥 Downloading from GitHub...")
+                
+                # Try versions v6, v5, v4, v3, v2, v1
+                downloaded = False
+                for version in [6, 5, 4, 3, 2, 1]:
+                    url = f"https://raw.githubusercontent.com/elifesciences/elife-article-xml/master/articles/elife-{article_id}-v{version}.xml"
+                    print(f"  Trying v{version}...")
+                    
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                                if response.status == 200:
+                                    content = await response.read()
+                                    
+                                    # Check if XML has body content (basic validation)
+                                    content_str = content.decode('utf-8', errors='ignore')
+                                    if '<body>' in content_str or '<back>' in content_str:
+                                        # Save the XML
+                                        samples_dir.mkdir(parents=True, exist_ok=True)
+                                        expected_xml.write_bytes(content)
+                                        print(f"✅ Downloaded v{version} successfully")
+                                        downloaded = True
+                                        break
+                                    else:
+                                        print(f"  v{version} has no body content, trying next version...")
+                                elif response.status == 404:
+                                    print(f"  v{version} not found (404)")
+                                else:
+                                    print(f"  v{version} returned HTTP {response.status}")
+                    except Exception as e:
+                        print(f"  v{version} error: {e}")
+                        continue
+                
+                if not downloaded:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Could not download XML for article {article_id}. Please check that the article exists on GitHub."
+                    )
+        
+        print(f"🎯 Starting Workflow 5 analysis...")
+        
+        # Create workflow
+        pipeline = ImpactAssessmentWorkflow(use_batch_api=True)
+        
+        # Run analysis in thread pool to avoid blocking the async event loop
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        print(f"📖 Phase A: Deep reading citations...")
+        
+        # Execute the blocking call in a thread pool
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(pool, pipeline.analyze_paper, article_id)
+        
+        print(f"✅ Analysis complete!")
         
         return {
             "success": True,
@@ -179,13 +257,23 @@ async def analyze_problematic_paper(article_id: str):
             "analysis": result.dict()
         }
         
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Paper XML not found for article {article_id}. Cannot perform analysis."
-        )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        import traceback
+        error_detail = traceback.format_exc()
+        print("=" * 80)
+        print("❌ WORKFLOW 5 ERROR:")
+        print(error_detail)
+        print("=" * 80)
+        
+        # Include detailed error message from the exception
+        error_msg = str(e)
+        if not error_msg or len(error_msg) < 50:
+            # If error message is too short, include the full traceback
+            error_msg = f"{str(e)}\n\nFull trace: {error_detail[-500:]}"
+        
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {error_msg}")
 
 
 @app.put("/api/citations/{source_id}/{target_id}/review-status")

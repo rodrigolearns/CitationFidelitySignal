@@ -67,15 +67,15 @@ class ImpactSynthesizer:
     def generate_complete_analysis(
         self,
         paper_metadata: Dict,
-        stage1_assessments: List[CitationAssessment],
+        phase_a_assessments: List[CitationAssessment],
         problematic_citations_contexts: List[Dict]
     ) -> CombinedImpactAnalysis:
         """
-        Generate complete impact analysis from Stage 1 results.
+        Generate complete impact analysis from Phase A results.
         
         Args:
             paper_metadata: Dict with title, authors, doi, total_citations
-            stage1_assessments: List of CitationAssessment objects from Stage 1
+            phase_a_assessments: List of CitationAssessment objects from Phase A
             problematic_citations_contexts: List of EnrichedCitationContext dicts
         
         Returns:
@@ -89,7 +89,7 @@ class ImpactSynthesizer:
             # Format prompt
             system_prompt, user_prompt = format_phase_b_prompt(
                 paper_metadata,
-                stage1_assessments,
+                phase_a_assessments,
                 problematic_citations_contexts
             )
             
@@ -193,6 +193,17 @@ class ImpactSynthesizer:
         self.logger.info(response_text)
         self.logger.info("=" * 80)
         
+        # Strip markdown code blocks if present (DeepSeek often wraps JSON in ```json...```)
+        response_text = response_text.strip()
+        if response_text.startswith('```'):
+            # Find the first newline after opening fence
+            start = response_text.find('\n')
+            # Find the closing fence
+            end = response_text.rfind('```')
+            if start != -1 and end != -1 and end > start:
+                response_text = response_text[start+1:end].strip()
+                self.logger.info("Stripped markdown code fences from response")
+        
         try:
             data = json.loads(response_text)
             
@@ -218,7 +229,7 @@ class ImpactSynthesizer:
         Analyze multiple papers in batch.
         
         Args:
-            papers_data: List of dicts with paper_metadata, stage1_assessments, contexts
+            papers_data: List of dicts with paper_metadata, phase_a_assessments, contexts
         
         Returns:
             Dict mapping article_id -> CombinedImpactAnalysis
@@ -231,7 +242,7 @@ class ImpactSynthesizer:
             try:
                 analysis = self.generate_complete_analysis(
                     paper_data['paper_metadata'],
-                    paper_data['stage1_assessments'],
+                    paper_data['phase_a_assessments'],
                     paper_data['problematic_citations_contexts']
                 )
                 results[article_id] = analysis

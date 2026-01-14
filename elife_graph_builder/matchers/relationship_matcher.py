@@ -1,7 +1,7 @@
 """
 Relationship matcher for detecting author and affiliation overlaps.
 
-Used in Part 5 to identify self-citations and institutional bias patterns.
+Used in Workflow 5 to identify self-citations and institutional bias patterns.
 """
 
 import logging

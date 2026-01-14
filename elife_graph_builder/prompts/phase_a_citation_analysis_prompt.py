@@ -130,9 +130,9 @@ Choose ONE impact level:
 - Example: All miscitations are just field context in Introduction
 
 **FALSE_POSITIVE**: After reading, the citation is actually acceptable
-- This is a METHODOLOGICAL citation and reference does provide the data/method (Part 2 was too strict)
+- This is a METHODOLOGICAL citation and reference does provide the data/method (Workflow 2 was too strict)
 - The citation is an acceptable paraphrase within scientific norms
-- Part 2 misunderstood the citation type or was overly harsh
+- Workflow 2 misunderstood the citation type or was overly harsh
 - Example: "We analyzed data from Smith 2020" and Smith's paper does contain that dataset
 
 ---
@@ -229,7 +229,7 @@ def format_phase_a_prompt(
     reference_papers: dict
 ) -> tuple:
     """
-    Format the Stage 1 prompt with actual paper data.
+    Format the Phase A prompt with actual paper data.
     
     Args:
         citing_paper: Dict with title, authors, doi, sections
@@ -264,7 +264,7 @@ def format_phase_a_prompt(
         
         citations_block += f"""## Citation {i}
 
-**Previous Analysis (Part 2):** {first_round.get('category', 'UNKNOWN')} (Confidence: {first_round.get('confidence', 0):.0%})
+**Previous Analysis (Workflow 2):** {first_round.get('category', 'UNKNOWN')} (Confidence: {first_round.get('confidence', 0):.0%})
 **Citation Type Detected:** {first_round.get('citation_type', 'UNKNOWN')}
 **Why Flagged:** {first_round.get('justification', 'Not provided')[:250]}...
 

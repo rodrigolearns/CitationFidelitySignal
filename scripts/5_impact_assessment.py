@@ -67,14 +67,14 @@ def main():
             print(f"📊 Overall Classification: {result.overall_classification}")
             print()
             print(f"📝 Executive Summary:")
-            print(f"   {result.stage2_combined_analysis.executive_summary}")
+            print(f"   {result.phase_b_analysis.executive_summary}")
             print()
             print(f"📄 Detailed Report:")
-            print(f"   {result.stage2_combined_analysis.detailed_report[:500]}...")
+            print(f"   {result.phase_b_analysis.detailed_report[:500]}...")
             print()
             
             # Pattern analysis
-            pattern = result.stage2_combined_analysis.pattern_analysis
+            pattern = result.phase_b_analysis.pattern_analysis
             severity = pattern.get('severity_assessment', {})
             
             print(f"🎯 Citation Impact Breakdown:")
@@ -84,7 +84,7 @@ def main():
             print()
             
             # Recommendations
-            recs = result.stage2_combined_analysis.recommendations
+            recs = result.phase_b_analysis.recommendations
             print(f"💡 Recommendations:")
             print(f"   For Reviewers: {recs['for_reviewers'][:150]}...")
             print(f"   For Readers: {recs['for_readers'][:150]}...")

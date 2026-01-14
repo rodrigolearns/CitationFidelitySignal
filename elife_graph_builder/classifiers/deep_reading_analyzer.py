@@ -192,26 +192,37 @@ class CitationAnalyzer:
             self.logger.debug("Prompt caching enabled for system prompt")
         
         # Log what we're sending
-        self.logger.info("=" * 80)
-        self.logger.info(f"SENDING TO LLM:")
-        self.logger.info(f"System prompt length: {len(system_prompt)} chars")
-        self.logger.info(f"User prompt length: {len(user_prompt)} chars")
-        self.logger.info(f"First 1000 chars of user prompt:")
-        self.logger.info(user_prompt[:1000])
-        self.logger.info("=" * 80)
+        print("=" * 80)
+        print(f"SENDING TO LLM:")
+        print(f"Model: {self.model}")
+        print(f"Provider: {self.provider}")
+        print(f"System prompt length: {len(system_prompt)} chars")
+        print(f"User prompt length: {len(user_prompt)} chars")
+        print(f"First 500 chars of user prompt:")
+        print(user_prompt[:500])
+        print("=" * 80)
         
         try:
+            print(f"📞 Calling {self.model} API...")
+            
+            # Set max_tokens based on provider
+            # DeepSeek default is 4096, but we need more for 10+ citations
+            max_tokens = 8192 if self.provider == 'deepseek' else 16384
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
-                temperature=self.temperature
+                temperature=self.temperature,
+                max_tokens=max_tokens
                 # Note: Not specifying response_format to allow JSON arrays
             )
+            
+            print("✅ API call successful")
             
             # Log token usage
             usage = response.usage
             if usage:
-                self.logger.info(
+                print(
                     f"Tokens used: {usage.total_tokens} "
                     f"(prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens})"
                 )
@@ -220,13 +231,82 @@ class CitationAnalyzer:
                 if hasattr(usage, 'prompt_tokens_details'):
                     cache_info = usage.prompt_tokens_details
                     if hasattr(cache_info, 'cached_tokens'):
-                        self.logger.info(f"Cached tokens: {cache_info.cached_tokens}")
+                        print(f"Cached tokens: {cache_info.cached_tokens}")
             
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            print(f"📝 Response content type: {type(content)}")
+            print(f"📝 Response length: {len(content) if content else 0} chars")
+            if content:
+                print(f"📝 First 200 chars of response: {content[:200]}")
+            else:
+                print("📝 CONTENT IS NONE OR EMPTY!")
+            
+            return content
             
         except Exception as e:
             self.logger.error(f"LLM API call failed: {e}")
             raise
+    
+    def _repair_json(self, broken_json: str, max_attempts: int = 3) -> str:
+        """
+        Attempt to repair malformed JSON using LLM.
+        
+        Args:
+            broken_json: The malformed JSON string
+            max_attempts: Maximum repair attempts
+            
+        Returns:
+            Repaired JSON string
+        """
+        for attempt in range(1, max_attempts + 1):
+            print(f"🔧 JSON repair attempt {attempt}/{max_attempts}...")
+            
+            repair_prompt = f"""You are a JSON repair expert. Fix the following malformed JSON array and return ONLY the valid JSON, nothing else.
+
+Rules:
+1. Complete any truncated objects
+2. Close all unclosed brackets/braces
+3. Fix any syntax errors
+4. Preserve all existing data
+5. Return ONLY valid JSON array, no markdown, no explanations
+
+Malformed JSON:
+{broken_json}
+
+Return the corrected JSON:"""
+            
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a JSON repair specialist. Return only valid JSON."},
+                        {"role": "user", "content": repair_prompt}
+                    ],
+                    temperature=0.0,  # Use 0 for deterministic repairs
+                    max_tokens=12288  # Allow for large responses
+                )
+                
+                repaired = response.choices[0].message.content.strip()
+                
+                # Strip markdown if present
+                if repaired.startswith('```'):
+                    start = repaired.find('\n')
+                    end = repaired.rfind('```')
+                    if start != -1 and end != -1:
+                        repaired = repaired[start+1:end].strip()
+                
+                # Test if it's valid JSON
+                json.loads(repaired)
+                print(f"✅ Repair successful on attempt {attempt}")
+                return repaired
+                
+            except Exception as e:
+                print(f"❌ Attempt {attempt} failed: {e}")
+                if attempt == max_attempts:
+                    raise
+                continue
+        
+        raise ValueError("Failed to repair JSON after all attempts")
     
     def _parse_response(self, response_text: str) -> List[CitationAssessment]:
         """
@@ -238,11 +318,56 @@ class CitationAnalyzer:
         Returns:
             List of CitationAssessment objects
         """
-        # ALWAYS log the full response for debugging
-        self.logger.info("=" * 80)
-        self.logger.info("FULL LLM RESPONSE:")
-        self.logger.info(response_text)
-        self.logger.info("=" * 80)
+        # Check for None response (API call issue)
+        if response_text is None:
+            error_msg = (
+                "❌ LLM API returned None (no content).\n"
+                "Possible causes:\n"
+                "  1. API call failed silently\n"
+                "  2. response.choices[0].message.content was None\n"
+                "  3. Model refused to respond\n"
+                "Check API logs and model settings."
+            )
+            print(error_msg)
+            raise ValueError(error_msg)
+        
+        # ALWAYS log the full response for debugging (using print for visibility)
+        print("=" * 80)
+        print("FULL LLM RESPONSE:")
+        print(f"Response type: {type(response_text)}")
+        print(f"Response length: {len(response_text) if response_text else 0} chars")
+        if response_text:
+            print(f"First 500 chars: {response_text[:500]}")
+            if len(response_text) > 500:
+                print(f"... ({len(response_text) - 500} more chars)")
+                print(f"Last 500 chars: {response_text[-500:]}")
+        else:
+            print("EMPTY RESPONSE!")
+        print("=" * 80)
+        
+        # Check for empty response
+        if not response_text or not response_text.strip():
+            error_msg = (
+                "❌ LLM returned empty response. Possible causes:\n"
+                "  1. API key is invalid or missing\n"
+                "  2. Model name is incorrect (check LLM_PROVIDER and model)\n"
+                "  3. Request was rejected by the API\n"
+                "  4. Network timeout or connection error\n"
+                "  5. Context window exceeded"
+            )
+            self.logger.error(error_msg)
+            raise ValueError("Empty LLM response")
+        
+        # Strip markdown code blocks if present (DeepSeek often wraps JSON in ```json...```)
+        response_text = response_text.strip()
+        if response_text.startswith('```'):
+            # Find the first newline after opening fence
+            start = response_text.find('\n')
+            # Find the closing fence
+            end = response_text.rfind('```')
+            if start != -1 and end != -1 and end > start:
+                response_text = response_text[start+1:end].strip()
+                self.logger.info("Stripped markdown code fences from response")
         
         try:
             # Parse JSON
@@ -258,26 +383,60 @@ class CitationAnalyzer:
                 self.logger.error(f"Keys in dict: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
                 self.logger.error(f"First 500 chars of response: {response_text[:500]}")
                 raise ValueError(f"Unexpected response format: {type(data)}, keys: {list(data.keys()) if isinstance(data, dict) else 'N/A'}")
-            
-            # Convert to CitationAssessment objects
-            assessments = []
-            for citation_data in citations_data:
-                try:
-                    assessment = CitationAssessment(**citation_data)
-                    assessments.append(assessment)
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse citation assessment: {e}")
-                    self.logger.debug(f"Problematic data: {citation_data}")
-            
-            return assessments
-            
+                
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse LLM response as JSON: {e}")
-            self.logger.debug(f"Response text: {response_text[:500]}...")
-            raise
-        except Exception as e:
-            self.logger.error(f"Failed to parse response: {e}")
-            raise
+            print(f"❌ JSON parsing failed: {e}")
+            print(f"Attempting to repair JSON with LLM...")
+            
+            # Try to repair the JSON using a lightweight LLM call
+            try:
+                repaired_text = self._repair_json(response_text, max_attempts=3)
+                data = json.loads(repaired_text)
+                print("✅ JSON repair successful!")
+                
+                # Handle both array and object with array field
+                if isinstance(data, dict) and 'citations' in data:
+                    citations_data = data['citations']
+                elif isinstance(data, list):
+                    citations_data = data
+                else:
+                    raise ValueError(f"Repaired JSON has unexpected format: {type(data)}")
+                    
+            except Exception as repair_error:
+                print(f"❌ JSON repair failed: {repair_error}")
+                # Provide detailed error with actual response
+                error_msg = (
+                    f"Failed to parse LLM response as JSON.\n"
+                    f"Original error: {e}\n"
+                    f"Repair error: {repair_error}\n"
+                    f"Response length: {len(response_text)} chars\n"
+                    f"First 1000 chars:\n{response_text[:1000]}\n"
+                    f"Last 1000 chars:\n{response_text[-1000:]}"
+                )
+                raise ValueError(error_msg)
+        
+        # Convert to CitationAssessment objects (runs after successful JSON parsing)
+        assessments = []
+        for citation_data in citations_data:
+            try:
+                assessment = CitationAssessment(**citation_data)
+                assessments.append(assessment)
+            except Exception as e:
+                print(f"⚠️ Failed to parse citation assessment: {e}")
+                print(f"Problematic data: {citation_data}")
+                self.logger.warning(f"Failed to parse citation assessment: {e}")
+                self.logger.debug(f"Problematic data: {citation_data}")
+        
+        if not assessments:
+            error_msg = (
+                f"Failed to create any CitationAssessment objects.\n"
+                f"Parsed {len(citations_data)} items from JSON, but all failed validation.\n"
+                f"Response length: {len(response_text)} chars\n"
+                f"First citation data: {citations_data[0] if citations_data else 'N/A'}"
+            )
+            raise ValueError(error_msg)
+        
+        return assessments
     
     def analyze_batch(
         self,

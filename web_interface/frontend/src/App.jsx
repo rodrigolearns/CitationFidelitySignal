@@ -4,6 +4,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import CitationList from './pages/CitationList'
 import CitationDetail from './pages/CitationDetail'
+import ProblematicPaperDetail from './pages/ProblematicPaperDetail'
 
 const theme = createTheme({
   palette: {
@@ -28,6 +29,7 @@ function App() {
         <Routes>
           <Route path="/" element={<CitationList />} />
           <Route path="/citation/:sourceId/:targetId" element={<CitationDetail />} />
+          <Route path="/problematic-paper/:article_id" element={<ProblematicPaperDetail />} />
         </Routes>
       </Router>
     </ThemeProvider>

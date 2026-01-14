@@ -1,5 +1,5 @@
 """
-Enhanced context extractor for Part 5: Deep Impact Analysis.
+Enhanced context extractor for Workflow 5: Deep Impact Analysis.
 
 Extracts full sections, author affiliations, funding information, and provides
 citation type-aware section selection for cost-optimized LLM analysis.

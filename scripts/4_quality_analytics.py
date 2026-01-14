@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Part 4: Data Analysis & Quality Assessment
+Workflow 4: Data Analysis & Quality Assessment
 
 Run comprehensive analysis after final determination to identify:
 - Overall pipeline statistics
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    """Run all Part 4 analyses."""
+    """Run all Workflow 4 analyses."""
     print("\n" + "="*70)
-    print("📊 PART 4: DATA ANALYSIS & QUALITY ASSESSMENT")
+    print("📊 WORKFLOW 4: DATA ANALYSIS & QUALITY ASSESSMENT")
     print("="*70)
     print("\nAnalyzing citation fidelity patterns across all processed papers...")
     print()
@@ -39,7 +39,7 @@ def main():
         logger.info("Running pipeline statistics analysis...")
         run_pipeline_stats()
         
-        logger.info("\n✅ Part 4 Analysis Complete!")
+        logger.info("\n✅ Workflow 4 Analysis Complete!")
         logger.info("\nGenerated Files:")
         logger.info("  - data/analysis/pipeline_stats.json")
         logger.info("\nView Results:")

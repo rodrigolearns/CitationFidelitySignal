@@ -56,8 +56,8 @@ class LLMClassifier:
             )
         else:  # openai
             self.api_key = api_key or Config.OPENAI_API_KEY
-            if not self.api_key:
-                raise ValueError("OpenAI API key required. Set OPENAI_API_KEY in .env")
+        if not self.api_key:
+            raise ValueError("OpenAI API key required. Set OPENAI_API_KEY in .env")
             self.model = model or os.getenv('OPENAI_MODEL', 'gpt-5-mini')
             self.client = OpenAI(api_key=self.api_key)
         
