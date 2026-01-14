@@ -57,7 +57,13 @@ class HybridEvidenceRetriever:
         
         # Stage 1: BM25 keyword search (fast filtering)
         logger.debug(f"Stage 1: BM25 search (top_n={bm25_top_n})")
-        self.bm25.build_index(reference_article_xml)
+        num_paragraphs = self.bm25.build_index(reference_article_xml)
+        
+        if num_paragraphs == 0 or self.bm25.bm25 is None:
+            logger.warning("No paragraphs found in reference article - INCOMPLETE_REFERENCE_DATA")
+            # Return empty list - caller should handle as incomplete reference
+            return []
+        
         bm25_candidates = self.bm25.search(citation_context, top_n=bm25_top_n)
         
         logger.info(f"BM25 returned {len(bm25_candidates)} candidate paragraphs")

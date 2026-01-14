@@ -218,6 +218,15 @@ class CitationQualificationPipeline:
             
             logger.info(f"Extracted {len(contexts)} citation contexts")
             
+            # Check if reference article has body text by trying to build BM25 index
+            from lxml import etree
+            try:
+                root = etree.fromstring(target_xml.encode('utf-8'))
+                body = root.find('.//body')
+                has_body = body is not None
+            except:
+                has_body = False
+            
             # Retrieve evidence for each context
             for context in contexts:
                 evidence_segments = self.evidence_retriever.retrieve(
@@ -229,6 +238,10 @@ class CitationQualificationPipeline:
                 )
                 
                 context.evidence_segments = evidence_segments
+                
+                # Mark if no evidence due to incomplete reference
+                if not evidence_segments and not has_body:
+                    logger.info(f"  INCOMPLETE_REFERENCE_DATA: Reference article has no body text")
                 
                 logger.info(
                     f"  Instance {context.instance_id}: "
@@ -323,7 +336,11 @@ class CitationQualificationPipeline:
                         len(ctx.evidence_segments) for ctx in contexts
                     )
                     
-                    logger.info(f"✅ Citation qualified successfully")
+                    # Check if this was incomplete reference data
+                    if all(not ctx.evidence_segments for ctx in contexts):
+                        logger.info(f"✅ Citation processed (INCOMPLETE_REFERENCE_DATA)")
+                    else:
+                        logger.info(f"✅ Citation qualified successfully")
                 else:
                     logger.warning(f"⚠️  No contexts extracted")
                     stats['failed'] += 1

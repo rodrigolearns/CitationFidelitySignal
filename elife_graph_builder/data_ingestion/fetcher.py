@@ -84,17 +84,49 @@ class ELifeFetcher:
         
         return articles[:count]
     
-    def download_article_xml(self, article_id: str, version: int = 1) -> Optional[Path]:
+    def get_latest_version(self, article_id: str) -> int:
         """
-        Download a single article XML file directly from GitHub.
+        Query eLife API to get the latest version number for an article.
         
         Args:
             article_id: eLife article ID (e.g., "12345")
-            version: Article version number (default: 1)
+            
+        Returns:
+            Version number (e.g., 2) or 1 if API call fails
+        """
+        try:
+            api_url = f"{self.ELIFE_API_URL}/{article_id}"
+            response = self.session.get(api_url, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                version = data.get('version', 1)
+                logger.debug(f"Article {article_id}: latest version is v{version}")
+                return version
+            else:
+                logger.warning(f"API returned {response.status_code} for {article_id}, defaulting to v1")
+                return 1
+                
+        except Exception as e:
+            logger.warning(f"Failed to query API for {article_id}: {e}, defaulting to v1")
+            return 1
+    
+    def download_article_xml(self, article_id: str, version: Optional[int] = None) -> Optional[Path]:
+        """
+        Download a single article XML file directly from GitHub.
+        If version is not specified, queries the eLife API for the latest version.
+        
+        Args:
+            article_id: eLife article ID (e.g., "12345")
+            version: Article version number (default: None, will query API for latest)
         
         Returns:
             Path to downloaded file, or None if failed
         """
+        # Get latest version from API if not specified
+        if version is None:
+            version = self.get_latest_version(article_id)
+        
         # Construct filename: elife-{id}-v{version}.xml
         filename = f"elife-{article_id}-v{version}.xml"
         output_path = self.output_dir / filename
@@ -112,14 +144,19 @@ class ELifeFetcher:
             response = self.session.get(url, timeout=30)
             response.raise_for_status()
             
+            # Verify it has body content (for articles that should have it)
+            content = response.content
+            if b'<body>' not in content and len(content) < 100000:
+                logger.warning(f"Article {article_id} v{version} has no <body> element")
+            
             # Save to file
-            output_path.write_bytes(response.content)
+            output_path.write_bytes(content)
             logger.info(f"✓ Downloaded {filename}")
             return output_path
             
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                logger.warning(f"XML not found for article {article_id} (might be PDF-only or different version)")
+                logger.warning(f"XML not found for article {article_id} v{version} (might be PDF-only)")
             else:
                 logger.error(f"HTTP error downloading {filename}: {e}")
             return None

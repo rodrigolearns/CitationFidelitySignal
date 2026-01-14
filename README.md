@@ -53,11 +53,11 @@ Eventually, this will become a **user-facing service** where researchers can:
 
 ## 🏗️ System Architecture
 
-The system is composed of two main pipelines:
+The Citation Fidelity Signal system consists of five interconnected workflows:
 
-### **Part 1: Citation Graph & Evidence Extraction Pipeline**
+### **Workflow 1: Graph Construction & Evidence Retrieval**
 
-This pipeline discovers citation relationships and retrieves supporting evidence from source papers.
+This workflow discovers citation relationships and retrieves supporting evidence from source papers.
 
 **What It Does:**
 1. **Citation Discovery**: Identifies eLife papers that cite other eLife papers
@@ -66,31 +66,27 @@ This pipeline discovers citation relationships and retrieves supporting evidence
    - The sentence containing the citation
    - 1 sentence after the citation
 3. **Evidence Retrieval**: Finds relevant passages from the referenced paper using **hybrid retrieval**:
-   - **Stage 1 (BM25)**: Keyword-based search to narrow down candidates (top 20 paragraphs)
-   - **Stage 2 (Semantic Embeddings)**: Sentence-transformer models to find semantically similar passages (top 3-5)
+   - **BM25**: Keyword-based search to narrow down candidates (top 20 paragraphs)
+   - **Semantic Embeddings**: Sentence-transformer models to find semantically similar passages (top 3-5)
    - **Why chunks?** For efficiency—we don't need to send entire papers to the LLM, only the most relevant passages
 4. **Graph Storage**: Stores citation network in **Neo4j** for:
    - Easy traversal of citation chains
    - Analysis of citation propagation
    - Detection of recurring miscitations across multiple papers
 
-**Key Technologies:**
-- **JATS XML Parser**: Extracts metadata, references, and in-text citations
-- **Hybrid Retriever**: BM25 (keyword) + Sentence Transformers (semantic)
-- **Neo4j Graph Database**: Stores articles as nodes, citations as edges
-- **Async/Parallel Processing**: Handles large-scale data efficiently
+**Technologies:** JATS XML parsing | Hybrid retrieval (BM25 + semantic embeddings) | Neo4j graph database | Parallel processing for scale
 
 ---
 
-### **Part 2: Citation Fidelity Evaluation System**
+### **Workflow 2: Rapid Citation Screening**
 
-This pipeline uses LLMs to assess whether citations accurately represent the referenced work.
+This workflow uses LLMs to perform fast initial screening of all citations to identify potentially problematic ones.
 
 **What It Does:**
-1. **LLM Classification**: For each citation context + evidence pair:
+1. **Rapid LLM Screening**: For each citation context + evidence pair:
    - Sends the citation context (how the citing paper uses the reference)
    - Sends the evidence segments (relevant passages from the referenced paper)
-   - Uses GPT-4o-mini to classify the citation fidelity
+   - Uses DeepSeek Chat or GPT-4o-mini for fast classification
 
 2. **Classification Categories** (as defined in the LLM prompt):
    - **SUPPORT** - Evidence supports the citation claim (displayed in green)
@@ -104,28 +100,11 @@ This pipeline uses LLMs to assess whether citations accurately represent the ref
    
    **Note:** In the web interface, SUPPORT classifications are shown in green. All other categories are color-coded based on the LLM's confidence score (high confidence = red, medium = orange, low = yellow) to help prioritize manual review.
 
-3. **Data Storage**: Stores classification results in Neo4j on `CITES` relationship edges:
-   ```json
-   {
-     "citation_contexts": [
-       {
-         "instance_id": 1,
-         "context_text": "...",
-         "section": "Introduction",
-         "evidence_segments": [...],
-         "classification": {
-           "category": "SUPPORT",
-           "confidence": 0.92,
-           "justification": "...",
-           "classified_at": "2026-01-13T...",
-           "manually_reviewed": false,
-           "user_classification": null,
-           "user_comment": null
-         }
-       }
-     ]
-   }
-   ```
+3. **Data Storage**: Results are stored in the Neo4j graph on citation relationships, including:
+   - Classification category and confidence
+   - LLM's reasoning
+   - Evidence used for evaluation
+   - Support for manual review and overrides
 
 4. **Manual Review Interface**: Web application for researchers to:
    - Browse all analyzed citations
@@ -135,21 +114,132 @@ This pipeline uses LLMs to assess whether citations accurately represent the ref
    - Add comments for further investigation
    - Mark citations as manually reviewed
 
-**LLM Prompt Design:**
+**How It Works:**
 
-The system uses a carefully crafted prompt (see `elife_graph_builder/classifiers/llm_classifier.py`) that:
-- Explains the evaluation task clearly
-- Provides the citation context from the citing paper
-- Includes 3 evidence segments from the reference paper (with similarity scores)
-- Lists all classification categories with detailed definitions
-- Includes an example classification (OVERSIMPLIFY case)
-- Requests structured JSON output with category, confidence, and justification
+The screener understands that different types of citations require different evaluation criteria:
 
-**Key Technologies:**
-- **OpenAI GPT-4o-mini**: Cost-effective, reliable LLM for classification
-- **Prompt Engineering**: Structured prompts with examples for consistent results
-- **React + Material-UI**: Professional web interface
-- **FastAPI**: Backend API for data access
+- **Data Source Citations** ("We analyzed datasets from Smith 2020, Jones 2021..."): Verifies the reference actually provided the data, not whether it discusses the research question
+- **Finding Citations** ("Studies show X causes Y (Smith 2020)"): Checks whether the reference supports the claim and identifies oversimplifications
+- **Background Citations**: Confirms the reference explored the topic
+- **Attribution Citations**: Verifies correct attribution of discoveries
+
+This type-aware approach dramatically reduces false positives - preventing the system from incorrectly flagging valid data source citations as unsupported.
+
+**Technologies:** DeepSeek Chat (or GPT-4o-mini) for rapid screening | Hybrid retrieval | React + Material-UI web interface
+
+---
+
+### **Workflow 3: Deep Citation Verification**
+
+For citations flagged as potentially problematic in Workflow 2, this workflow performs an in-depth verification with expanded evidence to confirm or correct the initial screening.
+
+**What It Does:**
+1. **Selective Processing**: Only re-evaluates citations classified as:
+   - CONTRADICT
+   - NOT_SUBSTANTIATE
+   - OVERSIMPLIFY
+   - IRRELEVANT
+   - MISQUOTE
+   
+   (SUPPORT citations are already verified; INDIRECT and ETIQUETTE are lower priority)
+
+2. **Deeper Evidence Gathering**:
+   - Retrieves the full abstract for complete context
+   - Expands from 5 to 15 evidence segments for comprehensive analysis
+   - **Smart Section Targeting**: Automatically focuses on the right parts of the reference paper:
+     - Data source citations → Methods and Results sections
+     - Finding citations → Results and Discussion sections
+     - Background citations → Abstract and Introduction
+   - Quality checks ensure evidence is relevant and non-contradictory
+
+3. **In-Depth Re-Analysis**:
+   - Uses a more capable AI model (DeepSeek Reasoner or GPT-4o) for higher accuracy
+   - Reviews the initial screening with significantly more evidence
+   - Re-checks the citation type to catch mistakes (e.g., data sources flagged as unsupported claims)
+   - Follows a systematic evaluation process: abstract → methods → results → discussion → consistency
+   - Either confirms or corrects the initial classification
+   - Provides both technical analysis and plain-language explanations
+
+4. **Clear Results for Researchers**: Each verification provides:
+   - **Plain-language summary** of what was found
+   - **Key evidence** that supports the assessment
+   - **Recommendation** - whether the citation is accurate, needs review, or is a misrepresentation
+   - **Detailed analysis** for those who want to dig deeper
+
+5. **Results Storage**: Deep verifications are added to the graph, preserving both initial screening and deep verification assessments for comparison. This allows researchers to see the progression of analysis and understand when classifications were corrected.
+
+6. **Thorough Coverage**:
+   - Checks every place where a paper cites the reference (not just the first mention)
+   - Each citation context gets independent verification
+   - Helps identify inconsistent or contradictory citation patterns
+
+**Why This Matters:** Workflow 3 focuses intensive analysis only on suspicious citations, dramatically reducing false positives while keeping costs reasonable.
+
+**Technologies:** DeepSeek Reasoner (thinking mode) or GPT-4o | Enhanced evidence retrieval | Type-aware analysis
+
+---
+
+### **Workflow 4: Quality Analytics & Problem Detection**
+
+After all citations have been processed and verified, this workflow performs comprehensive analysis to identify patterns and problematic papers.
+
+**What It Does:**
+1. **Pipeline Statistics**: Generates comprehensive metrics about:
+   - Total articles and citations processed
+   - Classification distribution (SUPPORT, NOT_SUBSTANTIATE, etc.)
+   - Citation type distribution (CONCEPTUAL, METHODOLOGICAL, etc.)
+   - Second-round verification outcomes (CONFIRMED vs. CORRECTED)
+   - Overall citation fidelity rate
+   - False positive rate
+
+2. **Problematic Papers Identification**: Detects "repeat offenders":
+   - Papers with ≥2 problematic citations (NOT_SUBSTANTIATE, CONTRADICT, MISQUOTE)
+   - Ranks by severity (number of problematic citations)
+   - Displays in web interface for easy access
+
+3. **Quality Metrics**:
+   - Overall citation fidelity rate across the corpus
+   - Second-round verification accuracy
+   - Evidence quality distribution
+
+**Output:**
+- JSON file with detailed statistics (`data/analysis/pipeline_stats.json`)
+- "Problematic Papers" table in web interface showing top offenders
+- Console report with visual charts and key findings
+
+**Why This Matters:** Identifies systematic issues and helps researchers understand citation patterns. Highlights papers that may require deeper investigation or author notification. Automatically runs after Workflow 3.
+
+**Technologies:** Neo4j graph queries | Python data analysis | React data visualization
+
+---
+
+### **Workflow 5: Impact Assessment & Reporting**
+
+For papers identified as "repeat offenders" in Workflow 4 (≥2 problematic citations), this workflow performs comprehensive impact analysis to assess how miscitations affect the paper's scientific validity.
+
+**What It Does:**
+
+**Phase A: Citation Analysis**
+- Deep reading of full paper texts (citing paper + all referenced papers)
+- Assessment of each miscitation's validity and impact on paper conclusions
+- Identification of whether miscitations are central to findings or peripheral
+- Detailed quotes and evidence from both papers to support assessment
+- Uses DeepSeek Chat for cost-optimized deep reading (~$0.07 per paper vs $0.42 with GPT-5.2)
+
+**Phase B: Synthesis & Reporting**
+- Pattern detection across all problematic citations
+- Assessment of cumulative impact on paper validity
+- Classification: MINOR_ISSUES, MODERATE_CONCERNS, or MAJOR_PROBLEMS
+- Comprehensive report with:
+  - Executive summary for quick understanding
+  - Detailed analysis of each citation's impact
+  - Section-by-section breakdown (Introduction, Methods, Results, Discussion)
+  - Strategic recommendations for reviewers, readers, and authors
+- Uses DeepSeek Reasoner (thinking mode) for sophisticated analysis (~$0.01 per paper vs $0.12 with GPT-5.2)
+
+**Why This Matters:** Provides human-readable, actionable insights for researchers, reviewers, and editors. Distinguishes between minor writing issues and problems that genuinely affect scientific validity. **87% cheaper than GPT-5.2** while maintaining quality.
+
+**Technologies:** DeepSeek Chat & Reasoner | Full-text analysis | Pattern synthesis | Strategic assessment
 
 ---
 
@@ -160,19 +250,35 @@ eLife Papers (GitHub)
         ↓
    [Download & Parse]
         ↓
-   Extract Citations → Build Neo4j Graph (Articles + CITES edges)
+   Workflow 1: Graph Construction & Evidence Retrieval
+        ├─→ Extract Citations → Build Neo4j Graph
+        ├─→ Extract Contexts (4-sentence windows)
+        └─→ Retrieve Evidence (BM25 + Semantic, 5 segments)
         ↓
-   Extract Contexts (4-sentence windows)
+   Workflow 2: Rapid Citation Screening (DeepSeek Chat)
+        ├─→ Quick LLM classification of all citations
+        └─→ Store results in Neo4j
         ↓
-   Retrieve Evidence (BM25 + Semantic)
-        ↓
-   Store on CITES edges
-        ↓
-   LLM Classification (GPT-4o-mini)
-        ↓
-   Store Results in Neo4j
-        ↓
-   Web Interface (Manual Review)
+        ├─→ [SUPPORT] → Ready for Review
+        │
+        └─→ [Suspicious: CONTRADICT, NOT_SUBSTANTIATE, etc.]
+                ↓
+           Workflow 3: Deep Citation Verification (DeepSeek Reasoner)
+                ├─→ Enhanced Evidence Retrieval (15 segments + abstract)
+                ├─→ In-depth re-analysis with type-aware logic
+                └─→ Store verified results in Neo4j
+                ↓
+           Workflow 4: Quality Analytics & Problem Detection
+                ├─→ Generate pipeline statistics
+                ├─→ Identify problematic papers (≥2 issues)
+                └─→ Display in web interface
+                ↓
+           Workflow 5: Impact Assessment & Reporting (for problematic papers)
+                ├─→ Phase A: Citation Analysis (full text reading)
+                ├─→ Phase B: Synthesis & Reporting (pattern detection)
+                └─→ Generate comprehensive impact report
+                ↓
+   Web Interface (Manual Review + Analytics Dashboard + Impact Reports)
 ```
 
 ---
@@ -215,17 +321,33 @@ eLife Papers (GitHub)
    - Username: `neo4j`
    - Password: `elifecitations2024`
 
-5. **Run the full pipeline**
+5. **Run the complete workflow**
    ```bash
-   # Step 1: Import articles and build citation graph (10 papers for testing)
-   python3 scripts/run_streaming_pipeline.py --limit 10
+   # Workflow 1: Graph Construction (10 papers for testing)
+   python3 scripts/1_graph_construction.py --limit 10
+   # → Automatically cleans up XMLs for articles without eLife citations
 
-   # Step 2: Extract contexts and retrieve evidence
-   python3 scripts/continue_qualification.py --batch-size 10
+   # Workflow 2: Rapid Citation Screening (DeepSeek Chat)
+   python3 scripts/2_rapid_screening.py --batch-size 10
 
-   # Step 3: Classify citations with LLM
-   python3 scripts/classify_citations.py --batch-size 10
+   # Workflow 3: Deep Citation Verification (DeepSeek Reasoner)
+   python3 scripts/3_deep_verification.py --batch-size 5
+   # → Automatically cleans up ALL remaining XMLs after completion
+   # → Automatically runs Workflow 4: Quality Analytics
+   
+   # Workflow 4: Quality Analytics (runs automatically after Workflow 3)
+   python3 scripts/4_quality_analytics.py
+   
+   # Workflow 5: Impact Assessment (for problematic papers)
+   python3 scripts/5_impact_assessment.py <article_id>
+   # Example: python3 scripts/5_impact_assessment.py 84538
    ```
+
+   **Note on XML Cleanup:**
+   - **After Workflow 1**: XMLs for articles that don't cite any eLife papers are automatically deleted
+   - **After Workflow 3**: All remaining XMLs are deleted (analysis is complete and stored in Neo4j)
+   - **Workflow 4**: Automatically runs after Workflow 3 to generate statistics and identify problematic papers
+   - To keep XMLs for debugging, use `--skip-cleanup` flag on Workflow 1 or 3
 
 6. **Start the web interface**
    ```bash
@@ -251,23 +373,33 @@ eLife Papers (GitHub)
 
 ```
 CitationFidelitySignal/
-├── elife_graph_builder/           # Core pipeline modules
-│   ├── classifiers/                # LLM-based classification
-│   │   └── llm_classifier.py       # GPT-4o-mini integration + prompt
+├── elife_graph_builder/           # Core workflow modules
+│   ├── classifiers/                # LLM-based screening & verification
+│   │   ├── llm_classifier.py       # Workflow 2: Rapid screening
+│   │   ├── second_round_classifier.py  # Workflow 3: Deep verification
+│   │   └── deep_reading_analyzer.py    # Workflow 5 Phase A: Citation analysis
+│   ├── analyzers/                  # Pattern analysis & synthesis
+│   │   └── impact_analyzer.py      # Workflow 5 Phase B: Synthesis
 │   ├── data_ingestion/             # Article downloading
 │   ├── extractors/                 # Context extraction
 │   ├── graph/                      # Neo4j integration
 │   ├── matchers/                   # Citation matching
 │   ├── parsers/                    # JATS XML parsing
 │   ├── retrievers/                 # Evidence retrieval (BM25 + Semantic)
+│   ├── prompts/                    # LLM prompts for each workflow
 │   ├── models.py                   # Data models
-│   ├── streaming_pipeline.py       # Part 1: Graph building
-│   └── qualification_pipeline.py   # Part 1: Context + Evidence
-├── scripts/                        # Executable scripts
-│   ├── run_streaming_pipeline.py   # Import articles
-│   ├── continue_qualification.py   # Add contexts/evidence
-│   ├── classify_citations.py       # LLM classification
-│   └── clear_neo4j.py              # Reset database
+│   ├── graph_construction.py       # Workflow 1: Graph building
+│   ├── evidence_retrieval.py       # Workflow 1: Evidence retrieval
+│   ├── deep_verification.py        # Workflow 3: Deep verification
+│   └── impact_assessment.py        # Workflow 5: Impact assessment
+├── scripts/                        # Executable workflow scripts
+│   ├── 1_graph_construction.py     # Workflow 1: Graph construction
+│   ├── 2_rapid_screening.py        # Workflow 2: Rapid screening
+│   ├── 3_deep_verification.py      # Workflow 3: Deep verification
+│   ├── 4_quality_analytics.py      # Workflow 4: Quality analytics
+│   ├── 5_impact_assessment.py      # Workflow 5: Impact assessment
+│   ├── clear_neo4j.py              # Reset database
+│   └── clear_evidence.py           # Clear evidence data
 ├── web_interface/                  # Manual review interface
 │   ├── backend/                    # FastAPI server
 │   └── frontend/                   # React + Material-UI
@@ -280,19 +412,21 @@ CitationFidelitySignal/
 
 ## 📈 Current Status & Metrics
 
-### Pipeline Capabilities
+### Workflow Capabilities
 - ✅ **Article Import**: Downloads and parses eLife JATS XML
 - ✅ **Citation Discovery**: Identifies eLife→eLife citations
 - ✅ **Context Extraction**: 4-sentence windows around in-text citations
 - ✅ **Evidence Retrieval**: Hybrid BM25 + semantic search (min 3 segments per context)
-- ✅ **LLM Classification**: GPT-4o-mini with structured prompts
+- ✅ **Rapid Screening**: DeepSeek Chat for fast classification
+- ✅ **Deep Verification**: DeepSeek Reasoner for in-depth analysis
+- ✅ **Impact Assessment**: Full paper analysis for problematic citations
 - ✅ **Manual Review**: Web interface with filtering and annotation
 
-### Performance Metrics
-- **Processing Speed**: ~50-100 articles/minute (depends on API limits)
-- **Evidence Quality**: 3-5 evidence segments per citation context
-- **LLM Success Rate**: ~95% (with GPT-4o-mini and truncated evidence)
-- **Cost**: ~$0.002 per citation classification
+### Performance
+- Processes 50-100 articles per minute
+- Retrieves 3-5 high-quality evidence segments per citation
+- Successfully classifies ~95% of citations
+- Cost-effective at ~$0.002 per citation
 
 ---
 
@@ -340,7 +474,17 @@ Areas for contribution:
 
 ## 📄 License
 
-[Add your license here]
+**Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)**
+
+This project is free to use for:
+- ✅ Academic research
+- ✅ Personal projects
+- ✅ Non-profit organizations
+- ✅ Educational purposes
+
+**Commercial use requires a separate license.** If you wish to use this system commercially or monetize it in any way, please contact the creator for licensing terms.
+
+For the full license text, see: https://creativecommons.org/licenses/by-nc/4.0/
 
 ---
 
@@ -349,7 +493,9 @@ Areas for contribution:
 If you use this work in your research, please cite:
 
 ```
-[Add citation format]
+Rosas-Bertolini, Rodrigo (2026). Citation Fidelity Signal: 
+Detecting and Evaluating Citation Accuracy in Scientific Literature 
+Using LLM-Powered Analysis. GitHub repository.
 ```
 
 ---
@@ -365,7 +511,11 @@ If you use this work in your research, please cite:
 
 ## 📧 Contact
 
-[Add contact information]
+**Rodrigo Rosas-Bertolini**  
+Creator & Lead Developer
+
+📧 For commercial licensing inquiries, collaborations, or questions:  
+🔗 LinkedIn: [www.linkedin.com/in/rodrigo-rosas-bertolini-6a0743111](https://www.linkedin.com/in/rodrigo-rosas-bertolini-6a0743111)
 
 ---
 

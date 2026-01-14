@@ -16,6 +16,90 @@ class Neo4jClient:
         """Close the Neo4j driver."""
         self.driver.close()
     
+    def _aggregate_second_round_data(self, contexts: List[Dict]) -> Optional[Dict]:
+        """
+        Aggregate second-round classifications across all contexts.
+        
+        Returns the most concerning classification using priority hierarchy:
+        MISREPRESENTATION > NEEDS_REVIEW > ACCURATE
+        
+        Args:
+            contexts: List of citation context dictionaries
+            
+        Returns:
+            Dictionary with aggregated second-round data, or None if no second-round data exists
+        """
+        if not contexts:
+            return None
+        
+        # Collect all second-round classifications
+        second_round_contexts = []
+        for ctx in contexts:
+            if 'second_round' in ctx and ctx['second_round']:
+                second_round_contexts.append({
+                    'instance_id': ctx.get('instance_id'),
+                    'section': ctx.get('section'),
+                    'category': ctx['second_round'].get('category'),
+                    'recommendation': ctx['second_round'].get('recommendation', 'NEEDS_REVIEW'),
+                    'determination': ctx['second_round'].get('determination'),
+                    'confidence': ctx['second_round'].get('confidence', 0.0),
+                    'user_overview': ctx['second_round'].get('user_overview', '')
+                })
+        
+        if not second_round_contexts:
+            return None
+        
+        # Define priority order (higher number = more concerning)
+        recommendation_priority = {
+            'MISREPRESENTATION': 3,
+            'NEEDS_REVIEW': 2,
+            'ACCURATE': 1
+        }
+        
+        # Find worst-case classification
+        worst_context = max(
+            second_round_contexts,
+            key=lambda c: (
+                recommendation_priority.get(c['recommendation'], 0),
+                -c['confidence']  # Lower confidence = more concerning (secondary sort)
+            )
+        )
+        
+        # Count by recommendation
+        accurate_count = sum(1 for c in second_round_contexts if c['recommendation'] == 'ACCURATE')
+        needs_review_count = sum(1 for c in second_round_contexts if c['recommendation'] == 'NEEDS_REVIEW')
+        misrepresentation_count = sum(1 for c in second_round_contexts if c['recommendation'] == 'MISREPRESENTATION')
+        
+        # Count by determination
+        confirmed_count = sum(1 for c in second_round_contexts if c['determination'] == 'CONFIRMED')
+        corrected_count = sum(1 for c in second_round_contexts if c['determination'] == 'CORRECTED')
+        
+        return {
+            'has_second_round': True,
+            'total_contexts': len(contexts),
+            'contexts_with_second_round': len(second_round_contexts),
+            
+            # Worst case (most concerning)
+            'worst_recommendation': worst_context['recommendation'],
+            'worst_category': worst_context['category'],
+            'worst_instance_id': worst_context['instance_id'],
+            'worst_section': worst_context['section'],
+            'worst_user_overview': worst_context['user_overview'],
+            'worst_confidence': worst_context['confidence'],
+            
+            # Counts by recommendation
+            'accurate_count': accurate_count,
+            'needs_review_count': needs_review_count,
+            'misrepresentation_count': misrepresentation_count,
+            
+            # Counts by determination
+            'confirmed_count': confirmed_count,
+            'corrected_count': corrected_count,
+            
+            # All contexts for detail view
+            'all_second_round': second_round_contexts
+        }
+    
     def get_qualified_citations(self) -> List[Dict]:
         """
         Get all qualified citations with metadata and classifications.
@@ -48,23 +132,49 @@ class Neo4jClient:
             
             citations = []
             for record in result:
-                # Extract primary classification from contexts
+                # Extract classification data from contexts
                 classification = None
+                second_round_classification = None
+                second_round_determination = None
+                second_round_recommendation = None
                 manually_reviewed = False
+                second_round_summary = None
                 
                 if record["contexts_json"]:
                     try:
                         contexts = json.loads(record["contexts_json"])
                         if contexts and len(contexts) > 0:
-                            # Use first context's classification as primary
-                            first_ctx = contexts[0]
-                            if 'classification' in first_ctx:
-                                classification = first_ctx['classification'].get('category')
-                                manually_reviewed = first_ctx['classification'].get('manually_reviewed', False)
-                    except:
-                        pass
+                            # Check if this citation has evidence
+                            has_evidence = any(
+                                ctx.get('evidence_segments') and len(ctx.get('evidence_segments', [])) > 0
+                                for ctx in contexts
+                            )
+                            
+                            if not has_evidence:
+                                # Mark as INCOMPLETE_REFERENCE_DATA if no evidence found
+                                classification = "INCOMPLETE_REFERENCE_DATA"
+                            else:
+                                # Use first context's classification as primary (backward compatibility)
+                                first_ctx = contexts[0]
+                                if 'classification' in first_ctx and first_ctx['classification']:
+                                    classification = first_ctx['classification'].get('category')
+                                    manually_reviewed = first_ctx['classification'].get('manually_reviewed', False)
+                                
+                                # NEW: Aggregate second-round data across ALL contexts
+                                second_round_summary = self._aggregate_second_round_data(contexts)
+                                
+                                if second_round_summary:
+                                    # Set backward-compatible fields to worst case
+                                    second_round_classification = second_round_summary['worst_category']
+                                    second_round_recommendation = second_round_summary['worst_recommendation']
+                                    # Overall determination: CORRECTED if any were corrected
+                                    second_round_determination = (
+                                        'CORRECTED' if second_round_summary['corrected_count'] > 0 else 'CONFIRMED'
+                                    )
+                    except Exception as e:
+                        print(f"Error parsing contexts: {e}")
                 
-                citations.append({
+                citation_data = {
                     "source_id": record["source_id"],
                     "source_doi": record["source_doi"],
                     "source_title": record["source_title"],
@@ -80,8 +190,14 @@ class Neo4jClient:
                     "qualified_at": str(record["qualified_at"]) if record["qualified_at"] else None,
                     "classified": bool(record.get("classified")),
                     "classification": classification,
-                    "manually_reviewed": manually_reviewed
-                })
+                    "second_round_classification": second_round_classification,
+                    "second_round_determination": second_round_determination,
+                    "second_round_recommendation": second_round_recommendation,
+                    "manually_reviewed": manually_reviewed,
+                    "second_round_summary": second_round_summary
+                }
+                
+                citations.append(citation_data)
             
             return citations
     
@@ -124,9 +240,14 @@ class Neo4jClient:
             
             # Parse the JSON string containing contexts and evidence
             contexts_data = []
+            second_round_summary = None
+            
             if record["contexts_json"]:
                 try:
                     contexts_data = json.loads(record["contexts_json"])
+                    # Generate second-round summary if contexts have second-round data
+                    if contexts_data:
+                        second_round_summary = self._aggregate_second_round_data(contexts_data)
                 except json.JSONDecodeError:
                     contexts_data = []
             
@@ -146,7 +267,8 @@ class Neo4jClient:
                 "reference_id": record["reference_id"],
                 "context_count": record["context_count"],
                 "contexts": contexts_data,
-                "qualified_at": str(record["qualified_at"]) if record["qualified_at"] else None
+                "qualified_at": str(record["qualified_at"]) if record["qualified_at"] else None,
+                "second_round_summary": second_round_summary
             }
     
     def get_stats(self) -> Dict:
@@ -298,3 +420,208 @@ class Neo4jClient:
             )
             
             return True
+    
+    def get_problematic_papers(self) -> List[Dict]:
+        """
+        Get list of papers with multiple problematic citations.
+        
+        Returns:
+            List of papers sorted by number of problematic citations.
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (source:Article)-[c:CITES]->(target:Article)
+                WHERE c.qualified = true AND c.citation_contexts_json IS NOT NULL
+                RETURN source.article_id as article_id,
+                       source.title as title,
+                       source.doi as doi,
+                       source.authors as authors,
+                       c.citation_contexts_json as contexts_json
+            """)
+            
+            # Count problematic citations per paper
+            from collections import Counter
+            problematic_counts = Counter()
+            paper_details = {}
+            
+            for record in result:
+                article_id = record['article_id']
+                contexts = json.loads(record['contexts_json'])
+                
+                # Count NOT_SUBSTANTIATE, CONTRADICT, MISQUOTE
+                problematic = 0
+                for context in contexts:
+                    if context.get('classification'):
+                        classif = context['classification']
+                        if isinstance(classif, dict):
+                            category = classif.get('category', '')
+                            if category in ['NOT_SUBSTANTIATE', 'CONTRADICT', 'MISQUOTE']:
+                                problematic += 1
+                
+                if problematic > 0:
+                    problematic_counts[article_id] += problematic
+                    if article_id not in paper_details:
+                        paper_details[article_id] = {
+                            'article_id': article_id,
+                            'title': record['title'],
+                            'doi': record['doi'],
+                            'authors': record['authors'][:3] if record['authors'] else [],  # First 3 authors
+                            'problematic_count': 0
+                        }
+                    paper_details[article_id]['problematic_count'] += problematic
+            
+            # Filter for repeat offenders (≥2 problematic citations) and sort
+            problematic_papers = [
+                paper_details[pid] 
+                for pid, count in problematic_counts.items() 
+                if count >= 2
+            ]
+            problematic_papers.sort(key=lambda x: x['problematic_count'], reverse=True)
+            
+            return problematic_papers
+    
+    # ============================================================================
+    # Part 5: Deep Impact Analysis Methods
+    # ============================================================================
+    
+    def get_problematic_paper_detail(self, article_id: str) -> Optional[Dict]:
+        """
+        Get detailed information about a problematic paper.
+        
+        Args:
+            article_id: Article ID of the problematic citing paper
+        
+        Returns:
+            Dict with paper metadata, all citations, and impact analysis (if available)
+        """
+        with self.driver.session() as session:
+            # Get paper metadata
+            result = session.run("""
+                MATCH (a:Article {article_id: $article_id})
+                RETURN a.title as title,
+                       a.doi as doi,
+                       a.authors as authors,
+                       a.pub_date as pub_date,
+                       a.impact_analysis_json as impact_analysis,
+                       a.impact_classification as impact_classification,
+                       a.analyzed_at as analyzed_at
+            """, article_id=article_id)
+            
+            record = result.single()
+            if not record:
+                return None
+            
+            paper_metadata = {
+                'article_id': article_id,
+                'title': record['title'],
+                'doi': record['doi'],
+                'authors': record['authors'] or [],
+                'pub_date': record['pub_date'],
+                'impact_analysis': json.loads(record['impact_analysis']) if record['impact_analysis'] else None,
+                'impact_classification': record['impact_classification'],
+                'analyzed_at': record['analyzed_at']
+            }
+            
+            # Get all citations (both problematic and non-problematic)
+            result = session.run("""
+                MATCH (source:Article {article_id: $article_id})-[c:CITES]->(target:Article)
+                WHERE c.qualified = true
+                RETURN target.article_id as target_id,
+                       target.title as target_title,
+                       target.doi as target_doi,
+                       c.citation_contexts_json as contexts_json,
+                       c.context_count as context_count
+                ORDER BY target.article_id
+            """, article_id=article_id)
+            
+            citations = []
+            problematic_count = 0
+            
+            for record in result:
+                contexts = json.loads(record['contexts_json']) if record['contexts_json'] else []
+                
+                # Check if any context is problematic
+                is_problematic = False
+                for ctx in contexts:
+                    if ctx.get('classification', {}).get('category') in [
+                        'NOT_SUBSTANTIATE', 'CONTRADICT', 'OVERSIMPLIFY', 'MISQUOTE'
+                    ]:
+                        is_problematic = True
+                        problematic_count += 1
+                
+                citations.append({
+                    'target_id': record['target_id'],
+                    'target_title': record['target_title'],
+                    'target_doi': record['target_doi'],
+                    'contexts': contexts,
+                    'context_count': record['context_count'],
+                    'is_problematic': is_problematic
+                })
+            
+            paper_metadata['citations'] = citations
+            paper_metadata['total_citations'] = len(citations)
+            paper_metadata['problematic_citations_count'] = problematic_count
+            
+            return paper_metadata
+    
+    def store_impact_analysis(
+        self,
+        article_id: str,
+        analysis: Dict
+    ) -> bool:
+        """
+        Store Part 5 impact analysis results in Neo4j.
+        
+        Args:
+            article_id: Article ID
+            analysis: ProblematicPaperAnalysis dict
+        
+        Returns:
+            True if successful
+        """
+        with self.driver.session() as session:
+            from datetime import datetime
+            
+            session.run("""
+                MATCH (a:Article {article_id: $article_id})
+                SET a.impact_analysis_json = $analysis_json,
+                    a.impact_classification = $classification,
+                    a.analyzed_at = datetime($timestamp)
+            """,
+                article_id=article_id,
+                analysis_json=json.dumps(analysis),
+                classification=analysis.get('overall_classification', 'UNKNOWN'),
+                timestamp=datetime.now().isoformat()
+            )
+            
+            return True
+    
+    def get_papers_needing_analysis(self, limit: int = 10) -> List[str]:
+        """
+        Get article IDs of problematic papers that don't have impact analysis yet.
+        
+        Args:
+            limit: Maximum number of article IDs to return
+        
+        Returns:
+            List of article IDs
+        """
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (a:Article)
+                WHERE a.impact_analysis_json IS NULL
+                  AND EXISTS {
+                    MATCH (a)-[c:CITES]->()
+                    WHERE c.qualified = true AND c.citation_contexts_json IS NOT NULL
+                    WITH c, c.citation_contexts_json as contexts_json
+                    WITH json.parse(contexts_json) as contexts
+                    UNWIND contexts as context
+                    WHERE context.classification.category IN ['NOT_SUBSTANTIATE', 'CONTRADICT', 'OVERSIMPLIFY', 'MISQUOTE']
+                    RETURN count(context) as problematic_count
+                    WHERE problematic_count >= 2
+                  }
+                RETURN a.article_id as article_id
+                LIMIT $limit
+            """, limit=limit)
+            
+            return [record['article_id'] for record in result]

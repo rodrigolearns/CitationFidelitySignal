@@ -65,9 +65,9 @@ def clear_qualifications(
                 print("  - All classification data")
             
             print("\nYou will need to re-run:")
-            print("  1. scripts/continue_qualification.py --batch-size 10")
+            print("  1. scripts/extract_evidence.py --batch-size 10")
             if clear_classifications:
-                print("  2. scripts/classify_citations.py --batch-size 10")
+                print("  2. scripts/evaluate_fidelity.py --batch-size 10")
             
             response = input("\nProceed? (yes/no): ")
             
@@ -106,9 +106,9 @@ def clear_qualifications(
             print(f"✅ Successfully cleared {cleared} qualified citations")
             print("=" * 70)
             print("\nNext steps:")
-            print("  1. python3 scripts/continue_qualification.py --batch-size 10")
+            print("  1. python3 scripts/extract_evidence.py --batch-size 10")
             if clear_classifications:
-                print("  2. python3 scripts/classify_citations.py --batch-size 10")
+                print("  2. python3 scripts/evaluate_fidelity.py --batch-size 10")
             print()
     
     finally:

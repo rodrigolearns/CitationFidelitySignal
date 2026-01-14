@@ -1,4 +1,4 @@
-"""LLM-based citation classifier using OpenAI."""
+"""LLM-based citation classifier using DeepSeek/OpenAI."""
 
 import os
 import json
@@ -9,6 +9,7 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 from ..models import CitationContext, CitationClassification, EvidenceSegment
+from ..config import Config
 
 # Load environment variables
 load_dotenv()
@@ -29,29 +30,41 @@ class LLMClassifier:
         api_key: Optional[str] = None,
         model: str = None,
         temperature: float = 0.0,
-        max_tokens: int = 500
+        max_tokens: int = 500,
+        provider: str = None
     ):
         """
         Initialize the LLM classifier.
         
         Args:
-            api_key: OpenAI API key (defaults to env var)
-            model: Model to use (defaults to env var or gpt-5-mini)
+            api_key: API key (defaults to env var based on provider)
+            model: Model to use (defaults based on provider)
             temperature: Sampling temperature (0.0 = deterministic)
             max_tokens: Maximum tokens in response
+            provider: "deepseek" or "openai" (defaults to env var or deepseek)
         """
-        self.api_key = api_key or os.getenv('OPENAI_API_KEY')
-        if not self.api_key:
-            raise ValueError("OpenAI API key required. Set OPENAI_API_KEY in .env")
+        self.provider = provider or os.getenv('LLM_PROVIDER', 'deepseek')
         
-        self.model = model or os.getenv('OPENAI_MODEL', 'gpt-5-mini')
+        if self.provider == 'deepseek':
+            self.api_key = api_key or Config.DEEPSEEK_API_KEY
+            if not self.api_key:
+                raise ValueError("DeepSeek API key required. Set DEEPSEEK_API_KEY in .env")
+            self.model = model or 'deepseek-chat'
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url=Config.DEEPSEEK_BASE_URL
+            )
+        else:  # openai
+            self.api_key = api_key or Config.OPENAI_API_KEY
+            if not self.api_key:
+                raise ValueError("OpenAI API key required. Set OPENAI_API_KEY in .env")
+            self.model = model or os.getenv('OPENAI_MODEL', 'gpt-5-mini')
+            self.client = OpenAI(api_key=self.api_key)
+        
         self.temperature = temperature
         self.max_tokens = max_tokens
         
-        # Initialize OpenAI client
-        self.client = OpenAI(api_key=self.api_key)
-        
-        logger.info(f"✅ LLM Classifier initialized with model: {self.model}")
+        logger.info(f"✅ LLM Classifier initialized with {self.provider.upper()}: {self.model}")
     
     def _build_prompt(
         self,
@@ -89,7 +102,52 @@ Evidence {i} (similarity: {seg.similarity_score:.2f}, section: {seg.section}):
 "{truncated}"
 """
         
-        prompt = f"""You are a scientific citation accuracy evaluator. Your task is to determine whether evidence from a reference paper supports a citation made in a citing paper. IMPORTANT: The citation context below may reference multiple papers (e.g., "Smith, 2020; Jones, 2021"). You are evaluating ONLY the specific citation indicated. Other citations in the context are NOT relevant to your evaluation. Focus solely on whether THIS citation is supported by the provided evidence from its reference paper. The evidence segments were retrieved using semantic similarity and may or may not actually support the citation claim.
+        prompt = f"""You are a scientific citation accuracy evaluator. Your task is to determine whether evidence from a reference paper supports a citation made in a citing paper.
+
+IMPORTANT: First, identify the CITATION TYPE, as evaluation criteria differ:
+
+1. METHODOLOGICAL CITATION - References data sources, methods, or protocols
+   Examples:
+   - "We meta-analyzed four datasets (Smith 2020, Jones 2021, Miller 2018, Brown 2015)"
+   - "We used the protocol from Smith et al. (2020)"
+   - "Summary statistics were obtained from Jones et al."
+   
+   Evaluation criteria:
+   ✓ Does the reference provide the data/method mentioned?
+   ✗ NOT required: Supporting the broader research question
+   ✗ NOT required: Discussing sample size effects or meta-analysis concepts
+   
+   Common false positive: Flagging NOT_SUBSTANTIATE because the reference doesn't discuss
+   the citing paper's research question. For methodological citations, only verify the
+   data/method exists, not whether it supports the broader study goals.
+
+2. CONCEPTUAL CITATION - Makes claims about findings or conclusions
+   Examples:
+   - "Studies show that X causes Y (Smith et al., 2020)"
+   - "This finding is supported by Jones et al. (2021)"
+   
+   Evaluation criteria:
+   ✓ Does the reference support this specific claim?
+   ✓ Check for oversimplification or missing nuance
+
+3. BACKGROUND CITATION - Lists multiple studies that explored a topic
+   Examples:
+   - "Several studies (A, B, C) have explored this mechanism"
+   
+   Evaluation criteria:
+   ✓ Did the reference explore/investigate the topic?
+   ✗ NOT required: Agreement on conclusions
+
+4. ATTRIBUTION CITATION - Credits original discovery or concept
+   Examples:
+   - "CRISPR-Cas9 gene editing (Doudna & Charpentier, 2014)"
+   
+   Evaluation criteria:
+   ✓ Is this the correct attribution?
+
+MULTI-CITATION HANDLING:
+If multiple papers are cited together (e.g., "Smith 2020; Jones 2021"), evaluate ONLY
+the specific reference indicated. Other citations in the context are NOT relevant.
 
 CLASSIFICATION CATEGORIES (choose exactly ONE):
 
@@ -119,12 +177,31 @@ The citation appears to be a courtesy or conventional citation without substanti
 
 RESPONSE FORMAT:
 {{
+  "citation_type": "METHODOLOGICAL | CONCEPTUAL | BACKGROUND | ATTRIBUTION",
   "classification": "one of the 8 categories above",
   "confidence": 0.0-1.0,
-  "justification": "2-3 sentences explaining your reasoning"
+  "justification": "First identify the citation type, then explain your evaluation. For METHODOLOGICAL citations, focus on whether the reference provided the data/method, not whether it supports the broader research question."
 }}
 
-EXAMPLE - OVERSIMPLIFY:
+EXAMPLE 1 - METHODOLOGICAL (SUPPORT):
+Cited as: Gutierrez-Arcelus M et al. (2013)
+Citation Context (from citing paper):
+Section: Methods
+Text: "We meta-analyzed four LCL eQTL datasets (Aguet 2020, Lappalainen 2013, Gutierrez-Arcelus 2013, Buil 2015), leading to a total sample size of 1128 individuals."
+
+Evidence from Reference Paper:
+Evidence 1 (similarity: 0.59, section: Methods):
+"We performed Spearman rank correlations between SNP genotypes and exon expression levels (eQTLs) in 183–185 samples using a 1-MB window to either side of the TSS."
+
+Classification:
+{{
+  "citation_type": "METHODOLOGICAL",
+  "classification": "SUPPORT",
+  "confidence": 0.95,
+  "justification": "This is a METHODOLOGICAL citation listing data sources for meta-analysis. Gutierrez-Arcelus 2013 provided eQTL data from 183-185 LCL samples, which is exactly what the citation claims. The reference does not need to discuss meta-analysis concepts or sample size effects—it only needs to have generated the eQTL data being used."
+}}
+
+EXAMPLE 2 - CONCEPTUAL (OVERSIMPLIFY):
 Cited as: Kumar S et al. (2020)
 Citation Context (from citing paper):
 Section: Introduction
@@ -139,9 +216,10 @@ Evidence 2 (similarity: 0.79, section: Discussion):
 
 Classification:
 {{
+  "citation_type": "CONCEPTUAL",
   "classification": "OVERSIMPLIFY",
   "confidence": 0.82,
-  "justification": "The citation presents intermittent fasting as straightforwardly causing weight loss, but the reference paper shows this is only true when calorie-matched. The citation omits critical nuance about the mechanism and conditions under which the effect occurs."
+  "justification": "This is a CONCEPTUAL citation making a claim about causation. The evidence shows the effect is conditional on caloric restriction, not intermittent fasting per se. The citation oversimplifies a nuanced, conditional finding by presenting it as a straightforward causal relationship."
 }}
 
 ---
@@ -188,9 +266,10 @@ Provide your classification in JSON format.
         if not context.evidence_segments:
             logger.warning(f"No evidence segments for context {context.instance_id}")
             return CitationClassification(
-                classification="IRRELEVANT",
-                confidence=0.5,
-                justification="No evidence segments available for evaluation.",
+                citation_type="UNKNOWN",
+                category="EVAL_FAILED",
+                confidence=0.0,
+                justification="No evidence segments available - cannot evaluate citation.",
                 classified_at=datetime.now().isoformat(),
                 model_used=self.model,
                 tokens_used=0
@@ -227,9 +306,10 @@ Provide your classification in JSON format.
             if not result_text or result_text.strip() == "":
                 logger.error("Empty response from LLM")
                 return CitationClassification(
-                    classification="NOT_SUBSTANTIATE",
-                    confidence=0.3,
-                    justification="LLM returned empty response - unable to evaluate evidence quality.",
+                    citation_type="UNKNOWN",
+                    category="EVAL_FAILED",
+                    confidence=0.0,
+                    justification="LLM returned empty response - evaluation system failed.",
                     classified_at=datetime.now().isoformat(),
                     model_used=self.model,
                     tokens_used=response.usage.total_tokens if response.usage else 0
@@ -240,13 +320,17 @@ Provide your classification in JSON format.
             # Extract token usage
             tokens_used = response.usage.total_tokens
             
+            # Extract citation_type (with fallback)
+            citation_type = result.get('citation_type', 'UNKNOWN')
+            
             logger.info(
                 f"✅ Classification: {result['classification']} "
-                f"(confidence: {result['confidence']:.2f}, tokens: {tokens_used})"
+                f"(type: {citation_type}, confidence: {result['confidence']:.2f}, tokens: {tokens_used})"
             )
             
             return CitationClassification(
-                classification=result['classification'],
+                citation_type=citation_type,
+                category=result['classification'],
                 confidence=float(result['confidence']),
                 justification=result['justification'],
                 classified_at=datetime.now().isoformat(),
@@ -307,7 +391,8 @@ Provide your classification in JSON format.
                 # Add error classification
                 classifications.append(
                     CitationClassification(
-                        classification="ERROR",
+                        citation_type="UNKNOWN",
+                        category="ERROR",
                         confidence=0.0,
                         justification=f"Classification failed: {str(e)}",
                         classified_at=datetime.now().isoformat(),

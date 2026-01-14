@@ -30,7 +30,7 @@ app = FastAPI(
 # CORS middleware for React frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["http://localhost:3000", "http://localhost:3001", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -100,6 +100,92 @@ async def get_citation_detail(source_id: str, target_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/problematic-papers")
+async def get_problematic_papers():
+    """
+    Get list of papers with multiple problematic citations (repeat offenders).
+    
+    Returns:
+        List of papers with counts of problematic citations, sorted by severity.
+    """
+    try:
+        papers = neo4j_client.get_problematic_papers()
+        return papers
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/problematic-paper/{article_id}")
+async def get_problematic_paper_detail(article_id: str):
+    """
+    Get detailed information about a problematic paper (Part 5).
+    
+    Args:
+        article_id: Article ID of the problematic citing paper
+    
+    Returns:
+        Paper metadata, all citations, and impact analysis (if available)
+    """
+    try:
+        paper_data = neo4j_client.get_problematic_paper_detail(article_id)
+        
+        if not paper_data:
+            raise HTTPException(status_code=404, detail=f"Paper not found: {article_id}")
+        
+        return paper_data
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/problematic-paper/{article_id}/analyze")
+async def analyze_problematic_paper(article_id: str):
+    """
+    Trigger Part 5 deep impact analysis for a problematic paper.
+    
+    This is a long-running operation (~35-50 seconds) that performs:
+    1. Stage 1: Deep reading analysis with GPT-5.2
+    2. Stage 2: Pattern analysis + report generation
+    
+    Args:
+        article_id: Article ID to analyze
+    
+    Returns:
+        Complete impact analysis with classification and report
+    """
+    try:
+        from pathlib import Path
+        import sys
+        
+        # Add project root to path
+        project_root = Path(__file__).parent.parent.parent
+        sys.path.insert(0, str(project_root))
+        
+        from elife_graph_builder.impact_pipeline import DeepImpactPipeline
+        
+        # Create pipeline
+        pipeline = DeepImpactPipeline(use_batch_api=True)
+        
+        # Run analysis
+        result = pipeline.analyze_paper(article_id)
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "classification": result.overall_classification,
+            "analysis": result.dict()
+        }
+        
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Paper XML not found for article {article_id}. Cannot perform analysis."
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 @app.put("/api/citations/{source_id}/{target_id}/review-status")

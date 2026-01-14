@@ -59,6 +59,8 @@ class BM25Retriever:
         
         if not self.paragraphs:
             logger.warning("No paragraphs extracted from article")
+            # Don't initialize BM25 - leave as None to signal no index
+            self.bm25 = None
             return 0
         
         # Build BM25 index from paragraph tokens
@@ -66,6 +68,35 @@ class BM25Retriever:
         self.bm25 = BM25Okapi(corpus)
         
         logger.info(f"Built BM25 index with {len(self.paragraphs)} paragraphs")
+        return len(self.paragraphs)
+    
+    def build_index_from_paragraphs(self, paragraphs: List[str]) -> int:
+        """
+        Build BM25 index from a list of paragraph strings.
+        
+        Args:
+            paragraphs: List of paragraph text strings
+            
+        Returns:
+            Number of paragraphs indexed
+        """
+        if not paragraphs:
+            logger.warning("No paragraphs provided")
+            self.bm25 = None
+            self.paragraphs = []
+            return 0
+        
+        # Create Paragraph objects from strings (Paragraph will tokenize itself)
+        self.paragraphs = [
+            Paragraph(text=text, section="Unknown", index=i)
+            for i, text in enumerate(paragraphs)
+        ]
+        
+        # Build BM25 index
+        corpus = [p.tokens for p in self.paragraphs]
+        self.bm25 = BM25Okapi(corpus)
+        
+        logger.info(f"Built BM25 index from {len(self.paragraphs)} provided paragraphs")
         return len(self.paragraphs)
     
     def search(self, query_text: str, top_n: int = 10) -> List[Paragraph]:
@@ -92,6 +123,11 @@ class BM25Retriever:
         # Get BM25 scores
         scores = self.bm25.get_scores(query_tokens)
         
+        # Defensive check: ensure scores length matches paragraphs
+        if len(scores) != len(self.paragraphs):
+            logger.error(f"BM25 index mismatch: {len(scores)} scores vs {len(self.paragraphs)} paragraphs")
+            return []
+        
         # Get top-N indices
         top_indices = sorted(
             range(len(scores)), 
@@ -99,8 +135,8 @@ class BM25Retriever:
             reverse=True
         )[:top_n]
         
-        # Filter out zero scores
-        top_indices = [i for i in top_indices if scores[i] > 0]
+        # Filter out zero scores and ensure indices are valid
+        top_indices = [i for i in top_indices if scores[i] > 0 and i < len(self.paragraphs)]
         
         # Return top paragraphs
         results = [self.paragraphs[i] for i in top_indices]

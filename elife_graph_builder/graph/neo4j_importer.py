@@ -178,11 +178,12 @@ class StreamingNeo4jImporter:
             session.run("""
                 UNWIND $batch as edge
                 
-                MERGE (source:Article {article_id: edge.source_id})
-                ON CREATE SET source.doi = edge.source_doi
+                // Only create edges between articles that already exist with full metadata
+                MATCH (source:Article {article_id: edge.source_id})
+                WHERE source.authors IS NOT NULL
                 
-                MERGE (target:Article {article_id: edge.target_id})
-                ON CREATE SET target.doi = edge.target_doi
+                MATCH (target:Article {article_id: edge.target_id})
+                WHERE target.authors IS NOT NULL
                 
                 MERGE (source)-[c:CITES {reference_id: edge.ref_id}]->(target)
                 SET c.citation_count = edge.count,
@@ -312,3 +313,33 @@ class StreamingNeo4jImporter:
         
         logger.info(f"Found {len(citations)} unqualified eLife→eLife citations")
         return citations
+    
+    def store_impact_analysis(self, article_id: str, analysis_dict: Dict) -> None:
+        """
+        Store Part 5 impact analysis results in Neo4j.
+        
+        Args:
+            article_id: Article ID
+            analysis_dict: Analysis results as dictionary
+        """
+        from datetime import datetime
+        
+        with self.driver.session() as session:
+            session.run("""
+                MATCH (a:Article {article_id: $article_id})
+                SET a.impact_analysis_json = $analysis_json,
+                    a.impact_classification = $classification,
+                    a.analyzed_at = $timestamp
+            """,
+                article_id=article_id,
+                analysis_json=json.dumps(analysis_dict),
+                classification=analysis_dict.get('overall_classification', 'UNKNOWN'),
+                timestamp=datetime.now().isoformat()
+            )
+        
+        logger.info(f"Stored impact analysis for {article_id}")
+    
+    def close(self):
+        """Close Neo4j connection."""
+        self.driver.close()
+        logger.info("✅ Neo4j connection closed")

@@ -2,6 +2,7 @@
 """Run streaming pipeline to continuously build Neo4j graph."""
 
 import sys
+import argparse
 import logging
 from pathlib import Path
 
@@ -16,6 +17,12 @@ logging.basicConfig(
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Build citation graph from eLife articles')
+    parser.add_argument('--limit', type=int, default=100, help='Number of articles to process (default: 100)')
+    parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
+    parser.add_argument('--skip-cleanup', action='store_true', help='Skip XML cleanup (keep all files)')
+    args = parser.parse_args()
+    
     print("\n" + "="*70)
     print("🌊 STREAMING CITATION GRAPH PIPELINE")
     print("="*70)
@@ -24,6 +31,8 @@ def main():
     print("  2. Parse and extract citations")
     print("  3. Stream results to Neo4j incrementally")
     print("  4. Handle rate limiting automatically")
+    if not args.skip_cleanup:
+        print("  5. Clean up XMLs for articles without eLife citations")
     print("\nNeo4j UI: http://localhost:7474")
     print("  Username: neo4j")
     print("  Password: elifecitations2024")
@@ -33,11 +42,11 @@ def main():
     pipeline = StreamingCitationPipeline()
     
     try:
-        # Process 100 articles in 2 batches
         pipeline.run_continuous(
-            total_articles=100,  # Process 100 for testing
-            batch_size=50,
-            start_page=1
+            total_articles=args.limit,
+            batch_size=args.batch_size,
+            start_page=None,  # Let progress tracker determine where to resume
+            skip_cleanup=args.skip_cleanup
         )
     except KeyboardInterrupt:
         print("\n\n⚠️  Stopping pipeline...")

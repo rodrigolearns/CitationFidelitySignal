@@ -26,6 +26,17 @@ class Config:
     NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "")
     NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
     
+    # LLM Provider Configuration
+    # DeepSeek (default - 87% cost savings)
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+    DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+    
+    # OpenAI (fallback/alternative)
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    
+    # Model selection
+    LLM_PROVIDER = os.getenv("LLM_PROVIDER", "deepseek")  # "deepseek" or "openai"
+    
     # eLife corpus configuration
     ELIFE_DOI_PREFIX = "10.7554/eLife."
     ELIFE_GITHUB_REPO = "https://github.com/elifesciences/elife-article-xml"

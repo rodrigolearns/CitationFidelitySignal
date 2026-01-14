@@ -1,7 +1,7 @@
 """Data models for eLife citation graph."""
 
 from datetime import datetime
-from typing import List, Optional, Set
+from typing import List, Optional, Set, Dict
 from pydantic import BaseModel, Field, validator
 import uuid
 
@@ -130,6 +130,18 @@ class EvidenceSegment(BaseModel):
     paragraph_index: Optional[int] = None  # Position in article
 
 
+class EnhancedEvidenceSegment(BaseModel):
+    """Enhanced evidence segment for second-round classification with more context."""
+    
+    section: str  # Section where evidence was found (e.g., "Methods", "Results")
+    section_title: Optional[str] = None  # Actual section heading if available
+    text: str  # The actual text of the evidence passage
+    paragraph_context: str  # Full paragraph containing the segment
+    similarity_score: float  # Semantic similarity score (0-1)
+    retrieval_method: str = "hybrid"  # How it was retrieved
+    paragraph_index: Optional[int] = None  # Position in article
+
+
 class CitationContext(BaseModel):
     """A 4-sentence context window around an in-text citation."""
     
@@ -150,6 +162,12 @@ class CitationContext(BaseModel):
     
     # Evidence from reference article
     evidence_segments: List[EvidenceSegment] = Field(default_factory=list)
+    
+    # First-round classification
+    classification: Optional[dict] = None  # Stores CitationClassification as dict
+    
+    # Second-round classification (for suspicious citations)
+    second_round: Optional[dict] = None  # Stores SecondRoundClassification as dict
     
     def __post_init__(self):
         """Build context_text from individual sentences."""
@@ -173,16 +191,172 @@ class CitationContextWithEvidence(BaseModel):
 
 
 class CitationClassification(BaseModel):
-    """LLM classification of a citation context."""
+    """LLM classification of a citation context (first round)."""
     
-    classification: str  # SUPPORT, CONTRADICT, NOT_SUBSTANTIATE, etc.
+    citation_type: str = "UNKNOWN"  # CONCEPTUAL, METHODOLOGICAL, BACKGROUND, ATTRIBUTION
+    category: str  # SUPPORT, CONTRADICT, NOT_SUBSTANTIATE, etc.
     confidence: float  # 0.0-1.0
     justification: str  # LLM's reasoning (2-3 sentences)
     classified_at: Optional[str] = None  # ISO timestamp
-    model_used: str = "gpt-5-mini"
+    model_used: str = "gpt-4o-mini"
     tokens_used: Optional[int] = None
+    evidence_count: int = 0  # Number of evidence segments used
     
     # User review fields
     manually_reviewed: bool = False
     user_classification: Optional[str] = None  # User's override
-    user_comment: Optional[str] = None  # User's notes
+    user_comment: Optional[str] = None
+
+
+class SecondRoundClassification(BaseModel):
+    """In-depth second-round classification with expanded evidence."""
+    
+    citation_type: str = "UNKNOWN"  # CONCEPTUAL, METHODOLOGICAL, BACKGROUND, ATTRIBUTION
+    category: str  # Final classification category
+    confidence: float  # 0.0-1.0 (typically higher than first round)
+    determination: str  # "CONFIRMED" or "CORRECTED"
+    detailed_explanation: str = ""  # Eloquent 150-250 word explanation for researchers
+    justification: str  # Technical reasoning (250+ words) for system debugging
+    classified_at: Optional[str] = None  # ISO timestamp
+    model_used: str = "gpt-4o"
+    tokens_used: Optional[int] = None
+    
+    # User-friendly fields for Citation Detail page
+    user_overview: str = ""  # 1 sentence verdict
+    key_findings: List[str] = Field(default_factory=list)  # Bullet points of key evidence
+    recommendation: str = "NEEDS_REVIEW"  # "ACCURATE", "NEEDS_REVIEW", "MISREPRESENTATION"
+    
+    # Evidence used
+    evidence_count: int  # Number of evidence segments (typically 15)
+    abstract_used: str  # The abstract text provided to LLM
+    enhanced_evidence: List[EnhancedEvidenceSegment] = Field(default_factory=list)
+    evidence_quality: Optional[Dict] = None  # Quality metrics for retrieved evidence
+    
+    # First round context
+    first_round_category: str  # What the first round classified as
+    first_round_confidence: float  # First round confidence score
+
+
+# ============================================================================
+# Part 5: Deep Impact Analysis Models
+# ============================================================================
+
+class AuthorInfo(BaseModel):
+    """Author information with affiliations."""
+    
+    name: str
+    affiliations: List[str] = Field(default_factory=list)
+    is_corresponding: bool = False
+
+
+class EnrichedCitationContext(BaseModel):
+    """Enriched citation context for deep impact analysis."""
+    
+    citation_id: int
+    target_article_id: str
+    
+    # Previous analysis (the "map")
+    first_round: Dict  # CitationClassification as dict
+    second_round: Optional[Dict] = None  # SecondRoundClassification as dict
+    
+    # Location intelligence
+    section: str  # Introduction, Methods, Results, Discussion
+    section_title: str
+    paragraph_number: int
+    full_paragraph: str
+    surrounding_context: str  # 2 paragraphs before/after
+    
+    # Relationship intelligence
+    shared_authors: List[str] = Field(default_factory=list)
+    shared_affiliations: List[str] = Field(default_factory=list)
+    is_self_citation: bool = False
+    is_same_institution: bool = False
+    citation_age_years: float = 0.0
+
+
+class CitationAssessment(BaseModel):
+    """Stage 1 output: Deep reading assessment of a single citation."""
+    
+    citation_id: int
+    impact_assessment: str  # HIGH_IMPACT, MODERATE_IMPACT, LOW_IMPACT, FALSE_POSITIVE
+    
+    # Citation role
+    citation_role: Dict  # type, claim, section, centrality, explanation
+    
+    # Citing paper analysis
+    citing_paper_claim: Dict  # full_paragraph, specific_claim, section
+    
+    # Reference paper analysis
+    reference_paper_evidence: Dict  # supportive_quotes, contradictory_quotes, summary
+    
+    # Validity impact analysis
+    validity_impact: Dict  # affects_main_finding, dependence, explanation, centrality_test
+    
+    # Relationship notes
+    relationship_context: Optional[Dict] = None  # is_self_citation, shared_affiliation, note
+
+
+class ClaimImpact(BaseModel):
+    """Impact of miscitations on a specific claim in the paper."""
+    
+    claim_text: str  # The actual claim from the paper
+    section: str  # Where the claim appears
+    paragraph_number: int
+    
+    # Citations supporting this claim
+    supporting_citation_ids: List[int]
+    problematic_citation_ids: List[int]
+    
+    # Impact assessment
+    status: str  # UNDERMINED, WEAKENED, UNAFFECTED, INDEPENDENT
+    explanation: str  # Why this status was assigned
+
+
+class RelationshipPatterns(BaseModel):
+    """Patterns in author and institutional relationships."""
+    
+    total_self_citations: int
+    total_same_institution: int
+    
+    self_citation_details: List[Dict]  # Which citations, which authors
+    institution_overlap_details: List[Dict]  # Which citations, which institutions
+    
+    potential_gaming_indicators: List[str] = Field(default_factory=list)
+
+
+class CombinedImpactAnalysis(BaseModel):
+    """Stage 2 output: Combined pattern analysis and impact report."""
+    
+    # Pattern Analysis (nested as per prompt)
+    pattern_analysis: Dict  # Contains section_distribution, claim_impact_map, relationship_patterns, severity_assessment
+    
+    # Report
+    overall_classification: str  # CRITICAL_CONCERN, MODERATE_CONCERN, MINOR_CONCERN, FALSE_ALARM
+    executive_summary: str
+    detailed_report: str  # Markdown formatted
+    recommendations: Dict[str, str]  # {"for_reviewers": "...", "for_readers": "..."}
+
+
+class ProblematicPaperAnalysis(BaseModel):
+    """Complete analysis of a problematic paper."""
+    
+    article_id: str
+    analysis_triggered_at: str  # ISO timestamp
+    
+    # Input data
+    citing_paper_metadata: Dict  # title, authors, doi, etc.
+    problematic_citations_count: int
+    total_citations_count: int
+    
+    # Stage outputs
+    stage1_deep_reading: List[CitationAssessment] = Field(default_factory=list)
+    stage2_combined_analysis: Optional[CombinedImpactAnalysis] = None
+    
+    # Final classification
+    overall_classification: str  # CRITICAL/MODERATE/MINOR/FALSE_ALARM
+    report_generated_at: Optional[str] = None
+    
+    # Caching
+    model_used: str = "gpt-5.2"
+    tokens_used_total: Optional[int] = None
+    cost_usd: Optional[float] = None

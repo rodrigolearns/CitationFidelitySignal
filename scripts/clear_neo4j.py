@@ -8,6 +8,7 @@ Use only in development when you want to start fresh.
 
 import logging
 import argparse
+from pathlib import Path
 from neo4j import GraphDatabase
 
 logging.basicConfig(
@@ -20,7 +21,8 @@ logger = logging.getLogger(__name__)
 def clear_neo4j(
     neo4j_uri: str = "bolt://localhost:7687",
     neo4j_user: str = "neo4j",
-    neo4j_password: str = "elifecitations2024"
+    neo4j_password: str = "elifecitations2024",
+    force: bool = False
 ):
     """
     Delete all nodes and relationships from Neo4j.
@@ -64,15 +66,18 @@ def clear_neo4j(
             print(f"  - {rel_count} relationships")
             print("\nThis action cannot be undone!")
             print("\nYou will need to re-run:")
-            print("  1. scripts/run_streaming_pipeline.py")
-            print("  2. scripts/continue_qualification.py")
-            print("  3. scripts/classify_citations.py")
+            print("  1. scripts/build_citation_graph.py")
+            print("  2. scripts/extract_evidence.py")
+            print("  3. scripts/evaluate_fidelity.py")
             
-            response = input("\nType 'DELETE ALL' to confirm: ")
-            
-            if response != 'DELETE ALL':
-                logger.info("❌ Aborted by user")
-                return
+            if not force:
+                response = input("\nType 'DELETE ALL' to confirm: ")
+                
+                if response != 'DELETE ALL':
+                    logger.info("❌ Aborted by user")
+                    return
+            else:
+                logger.info("Force flag enabled - skipping confirmation")
             
             # Delete all data
             logger.info("Deleting all data...")
@@ -84,6 +89,13 @@ def clear_neo4j(
             logger.info("\n" + "=" * 70)
             logger.info("✅ All data deleted from Neo4j")
             logger.info("=" * 70)
+            
+            # Also clear progress tracker
+            progress_file = Path("data/progress.json")
+            if progress_file.exists():
+                progress_file.write_text('{"last_page": 0, "total_processed": 0}')
+                logger.info("✅ Progress tracker reset")
+            
             logger.info("\nDatabase is now empty and ready for fresh data.")
             print("\nNext steps:")
             print("  1. Run streaming pipeline to import articles")
@@ -114,13 +126,19 @@ def main():
         default="elifecitations2024",
         help='Neo4j password'
     )
+    parser.add_argument(
+        '--force',
+        action='store_true',
+        help='Skip confirmation prompt'
+    )
     
     args = parser.parse_args()
     
     clear_neo4j(
         neo4j_uri=args.neo4j_uri,
         neo4j_user=args.neo4j_user,
-        neo4j_password=args.neo4j_password
+        neo4j_password=args.neo4j_password,
+        force=args.force
     )
 
 

@@ -20,12 +20,10 @@ from datetime import datetime
 from elife_graph_builder.classifiers import LLMClassifier
 from elife_graph_builder.graph.neo4j_importer import StreamingNeo4jImporter
 from elife_graph_builder.models import CitationContext, EvidenceSegment
+from elife_graph_builder.utils.logging_config import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Setup logging to both console and file (logs/evaluate_fidelity_YYYYMMDD.log)
+logger = setup_logging('evaluate_fidelity')
 
 
 class CitationClassificationPipeline:
@@ -49,12 +47,13 @@ class CitationClassificationPipeline:
     def get_unclassified_citations(self, limit: int = None) -> List[Dict]:
         """
         Get qualified but unclassified citations from Neo4j.
+        Only returns citations that have evidence segments (skips INCOMPLETE_REFERENCE_DATA).
         
         Args:
             limit: Maximum number to fetch
             
         Returns:
-            List of citation dictionaries
+            List of citation dictionaries with evidence
         """
         query = """
             MATCH (source:Article)-[c:CITES]->(target:Article)
@@ -77,10 +76,33 @@ class CitationClassificationPipeline:
         
         with self.neo4j.driver.session() as session:
             result = session.run(query)
-            citations = [dict(record) for record in result]
+            all_citations = [dict(record) for record in result]
         
-        logger.info(f"Found {len(citations)} unclassified citations")
-        return citations
+        # Filter out citations with no evidence (INCOMPLETE_REFERENCE_DATA)
+        citations_with_evidence = []
+        skipped_count = 0
+        
+        for citation in all_citations:
+            contexts = json.loads(citation['contexts_json'])
+            has_evidence = any(
+                ctx.get('evidence_segments') and len(ctx.get('evidence_segments', [])) > 0 
+                for ctx in contexts
+            )
+            
+            if has_evidence:
+                citations_with_evidence.append(citation)
+            else:
+                skipped_count += 1
+                logger.debug(
+                    f"Skipping {citation['source_id']}→{citation['target_id']} "
+                    f"(INCOMPLETE_REFERENCE_DATA - no evidence)"
+                )
+        
+        logger.info(f"Found {len(citations_with_evidence)} unclassified citations with evidence")
+        if skipped_count > 0:
+            logger.info(f"Skipped {skipped_count} citations with INCOMPLETE_REFERENCE_DATA")
+        
+        return citations_with_evidence
     
     def format_citation_string(
         self,
@@ -208,8 +230,11 @@ class CitationClassificationPipeline:
         target_id = citation_data['target_id']
         
         logger.info(f"📦 Classifying: {source_id} → {target_id}")
-        logger.info(f"   Source: {citation_data['source_title'][:60]}...")
-        logger.info(f"   Target: {citation_data['target_title'][:60]}...")
+        
+        source_title = citation_data.get('source_title') or 'Untitled'
+        target_title = citation_data.get('target_title') or 'Untitled'
+        logger.info(f"   Source: {source_title[:60]}...")
+        logger.info(f"   Target: {target_title[:60]}...")
         
         # Parse contexts
         contexts = self.parse_contexts_json(citation_data['contexts_json'])
@@ -264,7 +289,8 @@ class CitationClassificationPipeline:
                         for ev in context.evidence_segments
                     ],
                     'classification': {
-                        'category': classification.classification,
+                        'citation_type': classification.citation_type,
+                        'category': classification.category,
                         'confidence': classification.confidence,
                         'justification': classification.justification,
                         'classified_at': classification.classified_at,
@@ -280,8 +306,8 @@ class CitationClassificationPipeline:
                 if classification.tokens_used:
                     total_tokens += classification.tokens_used
                 
-                logger.info(f"      → {classification.classification} "
-                          f"(confidence: {classification.confidence:.2f})")
+                logger.info(f"      → {classification.category} "
+                          f"(type: {classification.citation_type}, confidence: {classification.confidence:.2f})")
                 
             except Exception as e:
                 logger.error(f"   Failed to classify context {i}: {e}")
@@ -388,7 +414,8 @@ def main():
         print(f"Total citations: {stats['total']}")
         print(f"Processed: {stats['processed']}")
         print(f"Failed: {stats['failed']}")
-        print(f"Total contexts: {stats['total_contexts']}")
+        if 'total_contexts' in stats:
+            print(f"Total contexts: {stats['total_contexts']}")
         print(f"Total tokens: {stats['total_tokens']:,}")
         
         if stats['total_tokens'] > 0:
