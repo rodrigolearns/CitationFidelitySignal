@@ -158,7 +158,7 @@ class SecondRoundClassifier:
         
         if self.provider == 'deepseek':
             api_key = Config.DEEPSEEK_API_KEY
-        if not api_key:
+            if not api_key:
                 raise ValueError("DEEPSEEK_API_KEY environment variable not set")
             # Use thinking mode for in-depth analysis
             self.model = model or 'deepseek-reasoner'
@@ -171,7 +171,7 @@ class SecondRoundClassifier:
             if not api_key:
                 raise ValueError("OPENAI_API_KEY environment variable not set")
             self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o")
-        self.client = OpenAI(api_key=api_key)
+            self.client = OpenAI(api_key=api_key)
         
         logger.info(f"SecondRoundClassifier initialized with {self.provider.upper()}: {self.model}")
     

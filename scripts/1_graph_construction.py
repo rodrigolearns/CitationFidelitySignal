@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description='Build citation graph from eLife articles')
     parser.add_argument('--limit', type=int, default=100, help='Number of articles to process (default: 100)')
     parser.add_argument('--batch-size', type=int, default=50, help='Batch size (default: 50)')
-    parser.add_argument('--skip-cleanup', action='store_true', help='Skip XML cleanup (keep all files)')
+    parser.add_argument('--enable-cleanup', action='store_true', help='Enable XML cleanup (delete non-citing papers)')
     args = parser.parse_args()
     
     print("\n" + "="*70)
@@ -31,7 +31,7 @@ def main():
     print("  2. Parse and extract citations")
     print("  3. Stream results to Neo4j incrementally")
     print("  4. Handle rate limiting automatically")
-    if not args.skip_cleanup:
+    if args.enable_cleanup:
         print("  5. Clean up XMLs for articles without eLife citations")
     print("\nNeo4j UI: http://localhost:7474")
     print("  Username: neo4j")
@@ -46,7 +46,7 @@ def main():
             total_articles=args.limit,
             batch_size=args.batch_size,
             start_page=None,  # Let progress tracker determine where to resume
-            skip_cleanup=args.skip_cleanup
+            skip_cleanup=(not args.enable_cleanup)  # Invert: skip_cleanup=True by default
         )
     except KeyboardInterrupt:
         print("\n\n⚠️  Stopping pipeline...")

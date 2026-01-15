@@ -339,7 +339,7 @@ export default function CitationList() {
               Problematic Papers (Repeat Offenders)
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Papers with ≥2 problematic citations (NOT_SUBSTANTIATE, CONTRADICT, or MISQUOTE). Click any row to view detailed breakdown.
+              Papers with ≥2 problematic citations (NOT_SUBSTANTIATE, CONTRADICT, or MISQUOTE). Sorted by impact assessment severity, then by number of problematic citations. Click any row to view detailed breakdown.
             </Typography>
             
             {/* Scrollable table container - fixed height to show ~10 rows */}
@@ -354,11 +354,11 @@ export default function CitationList() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1, backgroundColor: '#f5f5f5' }}>
                   <tr style={{ borderBottom: '2px solid #ddd' }}>
-                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Rank</th>
-                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>eLife ID</th>
-                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', minWidth: '300px' }}>Title</th>
-                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Authors</th>
+                    <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>Impact Assessment</th>
                     <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>Problematic Citations</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>eLife ID</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold', minWidth: '200px', maxWidth: '250px' }}>Title</th>
+                    <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>Authors</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,17 +376,49 @@ export default function CitationList() {
                         navigate(`/problematic-paper/${paper.article_id}`)
                       }}
                     >
-                      <td style={{ padding: '12px' }}>{idx + 1}</td>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                        <Chip 
+                          label={paper.impact_assessment || 'NOT_PERFORMED'}
+                          color={
+                            paper.impact_assessment === 'CRITICAL_CONCERN' ? 'error' :
+                            paper.impact_assessment === 'MODERATE_CONCERN' ? 'warning' :
+                            paper.impact_assessment === 'MINOR_CONCERN' ? 'warning' :
+                            paper.impact_assessment === 'FALSE_ALARM' ? 'success' :
+                            'default'
+                          }
+                          size="small"
+                          sx={{ 
+                            fontWeight: 'bold', 
+                            minWidth: '130px',
+                            ...(paper.impact_assessment === 'MINOR_CONCERN' && {
+                              backgroundColor: '#fff59d',
+                              color: '#000'
+                            })
+                          }}
+                        />
+                      </td>
+                      <td style={{ padding: '12px', textAlign: 'center' }}>
+                        <Chip 
+                          label={paper.problematic_count}
+                          color="error"
+                          size="small"
+                          sx={{ fontWeight: 'bold' }}
+                        />
+                      </td>
                       <td style={{ padding: '12px' }}>
                         <Typography variant="body2" fontFamily="monospace">
                           eLife.{paper.article_id}
                         </Typography>
                       </td>
-                      <td style={{ padding: '12px' }}>
+                      <td style={{ padding: '12px', maxWidth: '250px' }}>
                         <Typography variant="body2" sx={{ 
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap'
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          lineHeight: '1.4em',
+                          maxHeight: '2.8em'
                         }}>
                           {paper.title}
                         </Typography>
@@ -398,14 +430,6 @@ export default function CitationList() {
                             : 'N/A'}
                         </Typography>
                       </td>
-                      <td style={{ padding: '12px', textAlign: 'center' }}>
-                        <Chip 
-                          label={paper.problematic_count}
-                          color="error"
-                          size="small"
-                          sx={{ fontWeight: 'bold' }}
-                        />
-                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -413,7 +437,7 @@ export default function CitationList() {
             </Box>
             
             <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-              Showing all {problematicPapers.length} problematic papers • Scroll to see more
+              Showing all {problematicPapers.length} problematic papers • Organized by impact assessment severity • Scroll to see more
             </Typography>
           </Paper>
         )}
@@ -516,7 +540,18 @@ export default function CitationList() {
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: 'block' }}>
-            Showing {filteredCitations.length} of {citations.length} citations
+            {(() => {
+              const uniqueCitingSources = new Set(citations.map(c => c.source_id)).size;
+              const uniqueReferencedTargets = new Set(citations.map(c => c.target_id)).size;
+              const filteredCitingSources = new Set(filteredCitations.map(c => c.source_id)).size;
+              const filteredReferencedTargets = new Set(filteredCitations.map(c => c.target_id)).size;
+              
+              if (filteredCitations.length === citations.length) {
+                return `${uniqueCitingSources} citing papers reference ${uniqueReferencedTargets} eLife papers through ${citations.length} citations`;
+              } else {
+                return `Showing ${filteredCitations.length} of ${citations.length} citations (${filteredCitingSources} citing → ${filteredReferencedTargets} referenced)`;
+              }
+            })()}
           </Typography>
 
           <Box sx={{ height: 600, width: '100%' }}>

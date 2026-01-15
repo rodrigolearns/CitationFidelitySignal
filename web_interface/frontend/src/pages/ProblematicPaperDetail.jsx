@@ -21,6 +21,12 @@ import {
   List,
   ListItem,
   ListItemText,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -29,21 +35,26 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import WarningIcon from '@mui/icons-material/Warning'
 import ErrorIcon from '@mui/icons-material/Error'
 import InfoIcon from '@mui/icons-material/Info'
+import OpenInNewIcon from '@mui/icons-material/OpenInNew'
 import axios from 'axios'
 
 const API_BASE = 'http://localhost:8000'
 
-// Classification colors
+// Impact Assessment colors - matching the severity levels
 const CLASSIFICATION_COLORS = {
-  'MINOR_ISSUES': 'success',
-  'MODERATE_CONCERNS': 'warning',
-  'MAJOR_PROBLEMS': 'error',
+  'CRITICAL_CONCERN': 'error',      // 🔴 Red - Most concerning
+  'MODERATE_CONCERN': 'warning',    // 🟠 Orange - Moderate concern
+  'MINOR_CONCERN': 'info',          // 🔵 Blue - Minor concern
+  'FALSE_ALARM': 'success',         // 🟢 Green - No concern
+  'NOT_PERFORMED': 'default',       // ⚪ Grey - Not analyzed
 }
 
 const CLASSIFICATION_ICONS = {
-  'MINOR_ISSUES': <CheckCircleIcon />,
-  'MODERATE_CONCERNS': <WarningIcon />,
-  'MAJOR_PROBLEMS': <ErrorIcon />,
+  'CRITICAL_CONCERN': <ErrorIcon />,
+  'MODERATE_CONCERN': <WarningIcon />,
+  'MINOR_CONCERN': <InfoIcon />,
+  'FALSE_ALARM': <CheckCircleIcon />,
+  'NOT_PERFORMED': <InfoIcon />,
 }
 
 export default function ProblematicPaperDetail() {
@@ -153,6 +164,115 @@ export default function ProblematicPaperDetail() {
     return `${authors.slice(0, 3).join(', ')}, et al.`
   }
 
+  const formatIntextCitation = (authors, year) => {
+    if (!authors || authors.length === 0) return `(${year || 'n.d.'})`
+    const firstAuthor = authors[0]
+    if (authors.length === 1) {
+      return `${firstAuthor}, ${year || 'n.d.'}`
+    } else if (authors.length === 2) {
+      return `${firstAuthor} and ${authors[1]}, ${year || 'n.d.'}`
+    } else {
+      return `${firstAuthor} et al., ${year || 'n.d.'}`
+    }
+  }
+
+  // Get unique reference papers from problematic citations
+  const getUniqueReferencePapers = () => {
+    if (!paperData?.problematic_citations) return []
+    
+    const uniquePapers = new Map()
+    paperData.problematic_citations.forEach(citation => {
+      if (!uniquePapers.has(citation.target_id)) {
+        // Extract in-text citation from the context if available
+        let inTextCitation = null
+        if (citation.context) {
+          // Try to find the citation format in the context
+          // Common patterns: "Author et al., YEAR" or "Author, YEAR" or "(Author et al., YEAR)"
+          const citationMatch = citation.context.match(/([A-Z][a-z]+(?:\s+et\s+al\.)?(?:\s+and\s+[A-Z][a-z]+)?),?\s+(\d{4}[a-z]?)/);
+          if (citationMatch) {
+            inTextCitation = citationMatch[0]
+          }
+        }
+        
+        uniquePapers.set(citation.target_id, {
+          target_id: citation.target_id,
+          target_title: citation.target_title,
+          target_authors: citation.target_authors,
+          target_year: citation.target_year,
+          in_text_citation: inTextCitation
+        })
+      }
+    })
+    return Array.from(uniquePapers.values())
+  }
+
+  // Build section table data with severity counts
+  const buildSectionTableData = () => {
+    if (!impactAnalysis?.phase_b_analysis?.pattern_analysis) return []
+    
+    const patternAnalysis = impactAnalysis.phase_b_analysis.pattern_analysis
+    const sectionDistribution = patternAnalysis.section_distribution || {}
+    const severityAssessment = patternAnalysis.severity_assessment || {}
+    
+    // Group citations by section and severity
+    const sectionData = {}
+    
+    // Initialize sections from distribution
+    Object.entries(sectionDistribution).forEach(([section, count]) => {
+      if (section !== 'Unknown') {  // Skip Unknown from distribution
+        sectionData[section] = {
+          section,
+          total: count,
+          high: 0,
+          moderate: 0,
+          low: 0
+        }
+      }
+    })
+    
+    // Count severity by section
+    const countBySection = (citations, severity) => {
+      if (!citations || !Array.isArray(citations)) return
+      citations.forEach(citation => {
+        // Get section from citation data (now enriched from backend)
+        const section = citation.section || 'Unknown'
+        if (section === 'Unknown') return  // Skip unknown sections
+        
+        if (!sectionData[section]) {
+          sectionData[section] = {
+            section,
+            total: 0,
+            high: 0,
+            moderate: 0,
+            low: 0
+          }
+        }
+        sectionData[section][severity]++
+        // Update total if needed
+        if (sectionData[section].total === 0) {
+          sectionData[section].total = 1
+        }
+      })
+    }
+    
+    countBySection(severityAssessment.high_impact_citations, 'high')
+    countBySection(severityAssessment.moderate_impact_citations, 'moderate')
+    countBySection(severityAssessment.low_impact_citations, 'low')
+    
+    // Convert to array and sort by section order
+    const sectionOrder = ['Introduction', 'Methods', 'Results', 'Discussion']
+    return Object.values(sectionData)
+      .filter(s => s.section !== 'Unknown')  // Filter out Unknown sections
+      .sort((a, b) => {
+        const aIndex = sectionOrder.indexOf(a.section)
+        const bIndex = sectionOrder.indexOf(b.section)
+        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
+        if (aIndex !== -1) return -1
+        if (bIndex !== -1) return 1
+        return a.section.localeCompare(b.section)
+      })
+  }
+
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
@@ -243,6 +363,42 @@ export default function ProblematicPaperDetail() {
                 {paperData.problematic_citations?.length || 0} issues found
               </Typography>
             </Grid>
+
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                View Papers on eLife
+              </Typography>
+              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {/* Citing Article Button */}
+                <Button
+                  size="small"
+                  variant="contained"
+                  startIcon={<OpenInNewIcon />}
+                  href={`https://elifesciences.org/articles/${article_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  sx={{ textTransform: 'none', fontSize: '0.75rem', py: 0.5, px: 1 }}
+                >
+                  Open Citing Article
+                </Button>
+                
+                {/* Reference Paper Buttons */}
+                {getUniqueReferencePapers().map((refPaper) => (
+                  <Button
+                    key={refPaper.target_id}
+                    size="small"
+                    variant="outlined"
+                    startIcon={<OpenInNewIcon sx={{ fontSize: '0.9rem' }} />}
+                    href={`https://elifesciences.org/articles/${refPaper.target_id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{ textTransform: 'none', fontSize: '0.75rem', py: 0.5, px: 1 }}
+                  >
+                    {refPaper.in_text_citation || formatIntextCitation(refPaper.target_authors, refPaper.target_year)}
+                  </Button>
+                ))}
+              </Box>
+            </Grid>
           </Grid>
         </Paper>
 
@@ -293,62 +449,79 @@ export default function ProblematicPaperDetail() {
 
             {/* Pattern Analysis */}
             {impactAnalysis.phase_b_analysis?.pattern_analysis && (
-              <Accordion>
+              <Accordion defaultExpanded>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="h6">🔍 Pattern Analysis</Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <Grid container spacing={2}>
-                    {/* Section Distribution */}
-                    {impactAnalysis.phase_b_analysis.pattern_analysis.section_distribution && (
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                          Section Distribution
-                        </Typography>
-                        <List dense>
-                          {Object.entries(impactAnalysis.phase_b_analysis.pattern_analysis.section_distribution).map(([section, count]) => (
-                            <ListItem key={section}>
-                              <ListItemText
-                                primary={`${section}: ${count} citations`}
-                              />
-                            </ListItem>
-                          ))}
-                        </List>
-                      </Grid>
-                    )}
-
-                    {/* Severity Assessment */}
-                    {impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment && (
-                      <Grid item xs={12}>
-                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                          Severity Assessment
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                          Impact of each miscitation on the paper's scientific validity and conclusions
-                        </Typography>
-                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
-                          <Chip
-                            label={`High: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.high_impact_citations?.length || 0}`}
-                            color="error"
-                            size="small"
-                            title="Significantly affects main findings or conclusions"
-                          />
-                          <Chip
-                            label={`Moderate: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.moderate_impact_citations?.length || 0}`}
-                            color="warning"
-                            size="small"
-                            title="Affects supporting evidence or secondary claims"
-                          />
-                          <Chip
-                            label={`Low: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.low_impact_citations?.length || 0}`}
-                            color="success"
-                            size="small"
-                            title="Background/contextual issues with minimal impact"
-                          />
-                        </Box>
-                      </Grid>
-                    )}
-                  </Grid>
+                  <TableContainer>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell><strong>Citation Location</strong></TableCell>
+                          <TableCell align="center"><strong>Investigated Citations</strong></TableCell>
+                          <TableCell><strong>Severity Assessment</strong></TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {buildSectionTableData().map((row) => (
+                          <TableRow key={row.section} hover>
+                            <TableCell>{row.section}</TableCell>
+                            <TableCell align="center">{row.total}</TableCell>
+                            <TableCell>
+                              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                {row.high > 0 && (
+                                  <Chip
+                                    label={`High: ${row.high}`}
+                                    color="error"
+                                    size="small"
+                                    sx={{ minWidth: '80px' }}
+                                  />
+                                )}
+                                {row.moderate > 0 && (
+                                  <Chip
+                                    label={`Moderate: ${row.moderate}`}
+                                    color="warning"
+                                    size="small"
+                                    sx={{ minWidth: '110px' }}
+                                  />
+                                )}
+                                {row.low > 0 && (
+                                  <Chip
+                                    label={`Low: ${row.low}`}
+                                    color="success"
+                                    size="small"
+                                    sx={{ minWidth: '70px' }}
+                                  />
+                                )}
+                                {row.high === 0 && row.moderate === 0 && row.low === 0 && (
+                                  <Typography variant="caption" color="text.secondary">
+                                    No severity data
+                                  </Typography>
+                                )}
+                              </Box>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  
+                  {/* Legend */}
+                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
+                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
+                      <strong>Severity Definitions:</strong>
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      • <strong>High:</strong> Significantly affects main findings or conclusions
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      • <strong>Moderate:</strong> Affects supporting evidence or secondary claims
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" display="block">
+                      • <strong>Low:</strong> Background/contextual issues with minimal impact
+                    </Typography>
+                  </Box>
                 </AccordionDetails>
               </Accordion>
             )}
@@ -400,25 +573,34 @@ export default function ProblematicPaperDetail() {
                 </AccordionSummary>
                 <AccordionDetails>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    {impactAnalysis.phase_a_assessments.map((assessment, idx) => (
-                      <Paper key={idx} variant="outlined" sx={{ p: 2 }}>
-                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
-                          Citation #{assessment.citation_id || idx + 1}
-                        </Typography>
-                        <Chip
-                          label={assessment.impact_assessment}
-                          size="small"
-                          color={
-                            assessment.impact_assessment === 'HIGH_IMPACT' ? 'error' :
-                            assessment.impact_assessment === 'MODERATE_IMPACT' ? 'warning' : 'success'
-                          }
-                          sx={{ mb: 1 }}
-                        />
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                          {assessment.validity_impact?.explanation || 'No explanation available.'}
-                        </Typography>
-                      </Paper>
-                    ))}
+                    {impactAnalysis.phase_a_assessments.map((assessment, idx) => {
+                      // Find matching problematic citation to get author/year info
+                      const citationNum = assessment.citation_id || idx + 1
+                      const matchingCitation = paperData.problematic_citations?.[citationNum - 1]
+                      const intextCitation = matchingCitation 
+                        ? formatIntextCitation(matchingCitation.target_authors, matchingCitation.target_year)
+                        : null
+                      
+                      return (
+                        <Paper key={idx} variant="outlined" sx={{ p: 2 }}>
+                          <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                            {intextCitation ? `${intextCitation} - Citation #${citationNum}` : `Citation #${citationNum}`}
+                          </Typography>
+                          <Chip
+                            label={assessment.impact_assessment}
+                            size="small"
+                            color={
+                              assessment.impact_assessment === 'HIGH_IMPACT' ? 'error' :
+                              assessment.impact_assessment === 'MODERATE_IMPACT' ? 'warning' : 'success'
+                            }
+                            sx={{ mb: 1 }}
+                          />
+                          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                            {assessment.validity_impact?.explanation || 'No explanation available.'}
+                          </Typography>
+                        </Paper>
+                      )
+                    })}
                   </Box>
                 </AccordionDetails>
               </Accordion>
@@ -527,25 +709,68 @@ export default function ProblematicPaperDetail() {
 
           {paperData.problematic_citations && paperData.problematic_citations.length > 0 ? (
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {paperData.problematic_citations.map((citation, idx) => (
-                <Accordion key={idx}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
-                      <Typography variant="subtitle1" fontWeight="bold">
-                        Citation #{idx + 1}
-                      </Typography>
-                      <Chip
-                        label={citation.classification}
-                        size="small"
-                        color={citation.classification === 'SUPPORT' ? 'success' : 'warning'}
-                      />
-                      <Typography variant="body2" color="text.secondary" sx={{ ml: 'auto' }}>
-                        → eLife.{citation.target_id}
-                      </Typography>
-                    </Box>
-                  </AccordionSummary>
+              {paperData.problematic_citations.map((citation, idx) => {
+                const intextCitation = formatIntextCitation(citation.target_authors, citation.target_year)
+                return (
+                  <Accordion key={idx}>
+                    <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%', flexWrap: 'wrap' }}>
+                        <Typography variant="subtitle1" fontWeight="bold">
+                          {intextCitation} - Citation #{idx + 1}
+                        </Typography>
+                        <Chip
+                          label={citation.classification}
+                          size="small"
+                          variant="outlined"
+                          sx={{
+                            borderColor: 'black',
+                            color: 'black',
+                            '& .MuiChip-label': {
+                              color: 'black'
+                            }
+                          }}
+                        />
+                        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            → eLife.{citation.target_id}
+                          </Typography>
+                          {citation.target_title && (
+                            <Typography variant="caption" color="text.secondary" sx={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              ({citation.target_title})
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                    </AccordionSummary>
                   <AccordionDetails>
                     <Grid container spacing={2}>
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                          Referenced Paper
+                        </Typography>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                          <Typography variant="body2" fontFamily="monospace">
+                            eLife.{citation.target_id}
+                          </Typography>
+                          <Button
+                            size="small"
+                            variant="text"
+                            startIcon={<OpenInNewIcon />}
+                            href={`https://elifesciences.org/articles/${citation.target_id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            sx={{ textTransform: 'none', minWidth: 'auto' }}
+                          >
+                            View on eLife
+                          </Button>
+                        </Box>
+                        {citation.target_title && (
+                          <Typography variant="body2" color="text.secondary" sx={{ fontStyle: 'italic', mb: 2 }}>
+                            {citation.target_title}
+                          </Typography>
+                        )}
+                      </Grid>
+
                       <Grid item xs={12}>
                         <Typography variant="subtitle2" color="text.secondary">
                           Citation Context
@@ -578,7 +803,8 @@ export default function ProblematicPaperDetail() {
                     </Grid>
                   </AccordionDetails>
                 </Accordion>
-              ))}
+              )
+            })}
             </Box>
           ) : (
             <Alert severity="info">No problematic citations found for this paper.</Alert>

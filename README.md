@@ -1,6 +1,5 @@
 # Citation Fidelity Signal
-
-> **Detecting and Evaluating Citation Accuracy in Scientific Literature Using LLM-Powered Analysis**
+**Detecting and Evaluating Citation Accuracy in Scientific Literature Using LLM-Powered Analysis**
 
 ---
 
@@ -38,9 +37,77 @@ This project demonstrates citation fidelity analysis using **eLife articles** as
 - Strong citation network within eLife publications
 
 ### Current Scope
-- **Input**: eLife articles that cite other eLife articles
-- **Output**: Citation fidelity assessments with evidence and LLM evaluations
-- **Storage**: Neo4j graph database for network traversal and analysis
+
+The system processes recent eLife articles through a multi-stage pipeline:
+
+**Initial Scan (1,000 papers)**
+- Scanned 1,000 most recently published eLife articles (March 2025 - January 2026)
+- Time: ~5 minutes (API scan)
+
+**↓ Workflow 1: Graph Construction & Qualification**
+- **Input**: 1,000 papers scanned
+- **Output**: 
+  - 658 citing papers (cite other eLife papers)
+  - 1,463 referenced papers (cited by others)
+  - 1,692 citation relationships
+  - 1,688 qualified citations (with evidence retrieved)
+- **Time**: ~5 min (XML download) + ~15 sec (graph build) + ~11 min (qualification)
+
+**↓ Workflow 2: Rapid Citation Screening**
+- **Input**: 1,688 qualified citations
+- **Output**: 1,678 citations classified
+  - ✅ **SUPPORT**: 2,920 contexts (67.7%) - Citations are accurate
+  - ⚠️ **Suspicious**: 1,394 contexts (32.3%) across 461 papers
+    - NOT_SUBSTANTIATE: 1,245 contexts (28.9%)
+    - IRRELEVANT: 74 contexts (1.7%)
+    - CONTRADICT: 41 contexts (1.0%)
+    - OVERSIMPLIFY: 34 contexts (0.8%)
+- **Time**: ~8 minutes (parallel processing)
+- **Result**: **461 papers with suspicious citations** identified for deeper review
+
+**↓ Workflow 3: Deep Verification** (of suspicious citations)
+- **Input**: 461 papers with 861 suspicious citation relationships (1,394 contexts)
+- **Processing**: 569 citations with suspicious contexts verified (524 processed, 45 skipped)
+- **Output**: 757 contexts analyzed with enhanced evidence (abstract + 15 segments)
+  - ✅ **Corrected to Support**: 248 contexts (32.8%) - False positives from first round
+  - ⚠️ **Confirmed Suspicious**: 509 contexts (67.2%) - First-round was correct
+- **Time**: ~29.5 minutes (parallel processing with DeepSeek-Reasoner)
+- **Key Insight**: Second-round verification corrected ~33% of first-round false positives
+
+**↓ Workflow 4: Quality Analytics**
+- **Input**: All classified citations and verification results
+- **Output**: Comprehensive statistical analysis
+  - Overall citation fidelity rate: **69.4%**
+  - Problematic citations: 1,320 / 4,314 contexts (30.6%)
+  - False positive rate from first round: 32.4% (248 corrected out of 765 verified)
+  - Most common issues: NOT_SUBSTANTIATE (64.3%), SUPPORT after correction (22.5%)
+  - Recommendations: 40% NEEDS_REVIEW, 37.5% MISREPRESENTATION, 22.5% ACCURATE
+- **Time**: ~1 second
+- **Result**: Statistics saved to `data/analysis/pipeline_stats.json`
+
+**↓ Workflow 5: Impact Assessment**
+- **Input**: Select problematic papers for deep analysis (on-demand or batch)
+- **Processing**: Deep analysis with full paper context using DeepSeek-Reasoner
+  - Tested on top 10 most problematic papers (10-52 suspicious citations each)
+  - Uses "thinking" mode for thorough analysis
+- **Output**: Detailed impact classifications
+  - 8 papers: MODERATE_CONCERN
+  - 2 papers: MINOR_CONCERN  
+  - Detailed report showing citation-level analysis and patterns
+- **Time**: ~3.5 minutes per paper average (8-35 minutes depending on complexity)
+  - Simple papers (10-15 citations): ~8-10 minutes
+  - Complex papers (50+ citations): ~35 minutes
+  - Parallel processing: 5 papers concurrently
+- **Note**: Much slower than Workflows 2-3 due to full context analysis (by design)
+
+**Final Dataset:**
+- 2,100 total papers in citation network
+- 1,692 citation relationships analyzed
+- 1,678 citations classified in first round
+- 757 suspicious contexts verified in second round
+- 509 confirmed problematic contexts (after deep verification)
+- 461 papers with confirmed issues flagged for manual review
+- All data stored in Neo4j graph database for network analysis
 
 ### Future Vision
 Eventually, this will become a **user-facing service** where researchers can:
@@ -343,11 +410,10 @@ eLife Papers (GitHub)
    # Example: python3 scripts/5_impact_assessment.py 84538
    ```
 
-   **Note on XML Cleanup:**
-   - **After Workflow 1**: XMLs for articles that don't cite any eLife papers are automatically deleted
-   - **After Workflow 3**: All remaining XMLs are deleted (analysis is complete and stored in Neo4j)
+   **Note on XML Storage:**
+   - **Default behavior**: All XMLs are kept after processing (useful for debugging and re-analysis)
    - **Workflow 4**: Automatically runs after Workflow 3 to generate statistics and identify problematic papers
-   - To keep XMLs for debugging, use `--skip-cleanup` flag on Workflow 1 or 3
+   - To enable XML cleanup (delete files to save space), use `--enable-cleanup` flag on Workflow 1 or 3
 
 6. **Start the web interface**
    ```bash
@@ -427,6 +493,107 @@ CitationFidelitySignal/
 - Retrieves 3-5 high-quality evidence segments per citation
 - Successfully classifies ~95% of citations
 - Cost-effective at ~$0.002 per citation
+
+---
+
+## 🔮 Future Developments
+
+### Priority Improvements
+
+#### 1. **Workflow 2: Classification Granularity** 🎯
+**Problem**: Most citations are classified as `NOT_SUBSTANTIATE`, limiting analytical value and making it difficult to distinguish between different types of citation issues.
+
+**Solutions**:
+- [ ] Expand classification schema with more specific categories:
+  - `INCOMPLETE_SUPPORT` - Reference partially supports the claim but lacks key details
+  - `OVERSTATED_CLAIM` - Citing paper extrapolates beyond what reference actually shows
+  - `CONTEXT_MISMATCH` - Reference discusses the topic but in a different context
+  - `METHODOLOGICAL_MISMATCH` - Reference uses different methods/conditions
+  - `CHERRY_PICKED` - Citing paper selects favorable results while ignoring contradictory findings
+  - `MISSING_CAVEATS` - Citing paper omits important limitations/qualifications from reference
+- [ ] Refine LLM prompts to guide more nuanced classification
+- [ ] Add confidence thresholds to prevent over-classification into generic categories
+- [ ] Include examples of each category in prompts to improve LLM accuracy
+
+#### 2. **In-Text Citation Display** 📝
+**Problem**: Citations displayed as "Citation #1", "Citation #2" makes analysis difficult, especially when papers cite the same reference multiple times.
+
+**Solutions**:
+- [ ] Display citations using proper in-text format throughout UI:
+  - **Problematic Papers List**: Show "Smith et al., 2020" instead of "Citation #1"
+  - **Phase A Assessments**: Use author-year format for each citation instance
+  - **Citation Details**: Include formatted citation in headers
+- [ ] Backend: Extract and store in-text citation format during parsing:
+  - Parse `<xref>` tags to extract citation text
+  - Generate author-year format from reference metadata
+  - Store as `in_text_citation` field in Neo4j
+- [ ] Frontend: Update display logic to use formatted citations
+- [ ] Add tooltip showing full reference when hovering over in-text citation
+
+#### 3. **User Annotations & Notes** 💬
+**Problem**: Notes/comments in early workflows (Workflow 2-3) are not useful; manual review should focus on problematic papers after Workflow 5.
+
+**Solutions**:
+- [ ] Remove note-taking features from Workflow 2/3 citation lists
+- [ ] Add comprehensive annotation system to Problematic Paper Detail page:
+  - Per-citation notes visible in context
+  - Paper-level notes for overall assessment
+  - Severity override capability (upgrade/downgrade High/Moderate/Low)
+  - Flag for "requires expert review"
+  - Link to related citations within same paper
+- [ ] Store annotations in Neo4j with timestamp and user tracking
+- [ ] Export annotations with Workflow 5 reports for external review
+
+#### 4. **Phase A: Citation Impact Assessment Depth** 🔬
+**Problem**: Phase A assessments often conclude "discussion questionable, but results valid" without analyzing whether the citing paper's methodology, assumptions, or arguments actually depend on the miscited reference.
+
+**Solutions**:
+- [ ] Refine Phase A prompt to trace citation dependencies:
+  - **Methodological Dependencies**: "Did the citing paper justify their methods based on this reference?"
+  - **Assumption Dependencies**: "Does the citing paper's rationale rely on claims from this reference?"
+  - **Interpretive Dependencies**: "Are the citing paper's conclusions drawn by building on this reference?"
+  - **Data Dependencies**: "Does the citing paper compare their results against this reference's data?"
+- [ ] Add structured impact analysis fields:
+  - `affects_methods`: Boolean + explanation
+  - `affects_assumptions`: Boolean + explanation
+  - `affects_interpretation`: Boolean + explanation
+  - `undermined_claims`: List of specific claims/arguments put into question
+- [ ] Update Phase B synthesis to aggregate these dependency impacts:
+  - Clearly state which specific arguments/claims are undermined
+  - Avoid generic statements like "results remain valid"
+  - Provide evidence-based assessment of what can/cannot be trusted
+
+**Example Output**: 
+> "The citing paper's choice of treatment protocol (Methods, para 3) was justified by claiming that Reference X demonstrated 70% efficacy. However, Reference X does not report this efficacy rate. This undermines the methodological rationale, though the experimental execution itself remains sound. Readers should question why this specific protocol was chosen over alternatives."
+
+#### 5. **Problematic Paper Analysis: Enhanced Citation Context** 📊
+**Problem**: Problematic citations list lacks sufficient context for meaningful analysis.
+
+**Solutions**:
+- [ ] Add to each citation entry:
+  - **In-text citation format** (e.g., "Smith et al., 2020")
+  - **Section location** (Introduction/Methods/Results/Discussion)
+  - **Paragraph number** within section
+  - **Citation role** (background, methodological justification, comparative data, etc.)
+  - **Severity indicator** (High/Moderate/Low impact badge)
+  - **Quick summary** (1-sentence explanation of the issue)
+- [ ] Group citations by:
+  - Reference paper (show all instances of citing same paper)
+  - Section (Introduction citations vs. Methods citations)
+  - Severity (High impact citations first)
+- [ ] Add filtering and sorting options
+- [ ] Include "View in context" link to see full paragraph
+
+#### 6. **Classification Schema Refinement** 🏷️
+**Current Issue**: Over-reliance on generic categories reduces system utility.
+
+**Action Items**:
+- [ ] Conduct classification distribution analysis on processed corpus
+- [ ] Identify patterns in miscategorized citations through manual review
+- [ ] A/B test alternative prompt formulations
+- [ ] Add few-shot examples to prompts for edge cases
+- [ ] Implement confidence calibration for borderline classifications
+- [ ] Consider hierarchical classification (primary + secondary tags)
 
 ---
 

@@ -86,9 +86,9 @@ Note: Citations classified as SUPPORT, INCOMPLETE_REFERENCE_DATA,
     )
     
     parser.add_argument(
-        '--skip-cleanup',
+        '--enable-cleanup',
         action='store_true',
-        help='Skip XML cleanup after processing (keep all files)'
+        help='Enable XML cleanup after processing (delete all XMLs)'
     )
     
     args = parser.parse_args()
@@ -105,7 +105,7 @@ Note: Citations classified as SUPPORT, INCOMPLETE_REFERENCE_DATA,
     pipeline.run(batch_size=batch_size)
     
     # Phase 3 Cleanup: Remove all XML files after final determination
-    if not args.skip_cleanup:
+    if args.enable_cleanup:
         try:
             logger.info("\n" + "="*70)
             deleted = cleanup_all_xmls(Config.SAMPLES_DIR)

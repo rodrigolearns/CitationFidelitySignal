@@ -426,7 +426,8 @@ class Neo4jClient:
         Get list of papers with multiple problematic citations.
         
         Returns:
-            List of papers sorted by number of problematic citations.
+            List of papers sorted by number of problematic citations, 
+            including Workflow 5 impact assessment status.
         """
         with self.driver.session() as session:
             result = session.run("""
@@ -436,6 +437,7 @@ class Neo4jClient:
                        source.title as title,
                        source.doi as doi,
                        source.authors as authors,
+                       source.impact_classification as impact_classification,
                        c.citation_contexts_json as contexts_json
             """)
             
@@ -466,7 +468,8 @@ class Neo4jClient:
                             'title': record['title'],
                             'doi': record['doi'],
                             'authors': record['authors'][:3] if record['authors'] else [],  # First 3 authors
-                            'problematic_count': 0
+                            'problematic_count': 0,
+                            'impact_assessment': record.get('impact_classification') or 'NOT_PERFORMED'
                         }
                     paper_details[article_id]['problematic_count'] += problematic
             
@@ -476,7 +479,22 @@ class Neo4jClient:
                 for pid, count in problematic_counts.items() 
                 if count >= 2
             ]
-            problematic_papers.sort(key=lambda x: x['problematic_count'], reverse=True)
+            
+            # Sort by impact assessment (more damning first), then by problematic count
+            impact_priority = {
+                'CRITICAL_CONCERN': 0,
+                'MODERATE_CONCERN': 1,
+                'MINOR_CONCERN': 2,
+                'FALSE_ALARM': 3,
+                'NOT_PERFORMED': 4
+            }
+            
+            problematic_papers.sort(
+                key=lambda x: (
+                    impact_priority.get(x['impact_assessment'], 5),  # Unknown assessments go last
+                    -x['problematic_count']  # Higher problematic count first within category
+                )
+            )
             
             return problematic_papers
     
@@ -522,6 +540,10 @@ class Neo4jClient:
                 'analyzed_at': record['analyzed_at']
             }
             
+            # Enrich severity assessment with section information
+            if paper_metadata['impact_analysis']:
+                self._enrich_severity_assessment(paper_metadata['impact_analysis'])
+            
             # Get all problematic citations
             result = session.run("""
                 MATCH (source:Article {article_id: $article_id})-[c:CITES]->(target:Article)
@@ -529,6 +551,8 @@ class Neo4jClient:
                 RETURN target.article_id as target_id,
                        target.title as target_title,
                        target.doi as target_doi,
+                       target.authors as target_authors,
+                       target.pub_year as target_year,
                        c.citation_contexts_json as contexts_json,
                        c.context_count as context_count
                 ORDER BY target.article_id
@@ -550,6 +574,8 @@ class Neo4jClient:
                             'target_id': record['target_id'],
                             'target_title': record['target_title'],
                             'target_doi': record['target_doi'],
+                            'target_authors': record['target_authors'],
+                            'target_year': record['target_year'],
                             'classification': classification,
                             'context': ctx.get('context_text', 'No context available'),
                             'justification': classification_data.get('justification', 'No justification provided'),
@@ -591,6 +617,97 @@ class Neo4jClient:
             )
             
             return True
+    
+    def _normalize_section_name(self, section_title: str) -> str:
+        """Normalize section titles to standard categories (Introduction, Methods, Results, Discussion)."""
+        if not section_title:
+            return 'Unknown'
+        
+        section_lower = section_title.lower().strip()
+        
+        # Check for explicit main section names (case-insensitive exact match first)
+        main_sections = {
+            'introduction': 'Introduction',
+            'methods': 'Methods',
+            'materials and methods': 'Methods',
+            'results': 'Results',
+            'results and discussion': 'Results',  # Often combined
+            'discussion': 'Discussion',
+            'conclusions': 'Discussion',
+            'abstract': 'Abstract'
+        }
+        
+        # Exact match first
+        if section_lower in main_sections:
+            return main_sections[section_lower]
+        
+        # Check for main section as prefix (e.g., "Methods (subsection)" or "Methods: details")
+        for key, value in main_sections.items():
+            if section_lower.startswith(key + ' (') or section_lower.startswith(key + ':') or section_lower.startswith(key + ' -'):
+                return value
+        
+        # Map to standard sections by keyword matching (broader patterns)
+        if any(kw in section_lower for kw in ['introduction', 'background', 'overview']):
+            return 'Introduction'
+        elif any(kw in section_lower for kw in ['method', 'material', 'experimental', 'procedure', 'approach', 'technique']):
+            return 'Methods'
+        elif any(kw in section_lower for kw in ['result', 'finding', 'observation', 'data', 'analysis', 'measurement']):
+            return 'Results'
+        elif any(kw in section_lower for kw in ['discussion', 'conclusion', 'implication', 'interpretation', 'summary']):
+            return 'Discussion'
+        elif 'abstract' in section_lower:
+            return 'Abstract'
+        else:
+            # Unable to determine - return Unknown
+            return 'Unknown'
+    
+    def _enrich_severity_assessment(self, impact_analysis: dict) -> None:
+        """
+        Enrich severity assessment with section information by mapping citation indices
+        to their sections from phase_a_assessments.
+        
+        Note: The severity assessment uses 1-based indices to reference citations
+        in the phase_a_assessments array (citation #1 = index 0, etc.)
+        
+        Modifies the impact_analysis dict in place.
+        """
+        if not impact_analysis:
+            return
+        
+        # Get phase_a_assessments
+        phase_a = impact_analysis.get('phase_a_assessments', [])
+        if not phase_a:
+            return
+        
+        # Build mapping of citation number (1-based) -> normalized section
+        # The LLM references citations by their position in the array (1, 2, 3, ...)
+        citation_sections = {}
+        for idx, assessment in enumerate(phase_a):
+            citation_number = idx + 1  # Convert 0-based index to 1-based number
+            raw_section = assessment.get('citation_role', {}).get('section', 'Unknown')
+            # Normalize to main sections (Introduction, Methods, Results, Discussion)
+            normalized_section = self._normalize_section_name(raw_section)
+            citation_sections[citation_number] = normalized_section
+        
+        # Enrich severity assessment
+        phase_b = impact_analysis.get('phase_b_analysis', {})
+        pattern_analysis = phase_b.get('pattern_analysis', {})
+        severity = pattern_analysis.get('severity_assessment', {})
+        
+        if severity:
+            # Enrich each severity list with section information
+            for severity_level in ['high_impact_citations', 'moderate_impact_citations', 'low_impact_citations']:
+                if severity_level in severity:
+                    citation_numbers = severity[severity_level]
+                    if isinstance(citation_numbers, list):
+                        # Convert from list of numbers to list of objects with number and normalized section
+                        severity[severity_level] = [
+                            {
+                                'citation_id': num,
+                                'section': citation_sections.get(num, 'Unknown')
+                            }
+                            for num in citation_numbers
+                        ]
     
     def get_papers_needing_analysis(self, limit: int = 10) -> List[str]:
         """

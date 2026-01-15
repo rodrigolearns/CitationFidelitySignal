@@ -119,7 +119,7 @@ class StreamingCitationPipeline:
         total_articles: Optional[int] = None,
         batch_size: int = 50,
         start_page: Optional[int] = None,
-        skip_cleanup: bool = False
+        skip_cleanup: bool = True
     ):
         """
         Run continuous processing.
@@ -128,7 +128,7 @@ class StreamingCitationPipeline:
             total_articles: Total to process (None = process all)
             batch_size: Articles per batch
             start_page: Starting page (None = resume from tracker)
-            skip_cleanup: If True, don't delete XMLs for non-citing articles
+            skip_cleanup: If True, don't delete XMLs for non-citing articles (default: True)
         """
         logger.info(f"🚀 Starting continuous processing")
         logger.info(f"   Batch size: {batch_size}")

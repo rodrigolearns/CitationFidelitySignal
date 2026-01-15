@@ -150,6 +150,7 @@ class CitationContext(BaseModel):
     target_article_id: str
     ref_id: str  # Reference ID from bibliography
     section: str  # Section containing the citation
+    in_text_citation: str = ""  # How the citation appears in text (e.g., "Smith et al., 2020")
     
     # The 4-sentence window
     sentence_before_2: str = ""  # 2nd sentence before citation

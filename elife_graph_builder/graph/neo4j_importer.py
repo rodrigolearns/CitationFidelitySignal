@@ -313,7 +313,7 @@ class StreamingNeo4jImporter:
         
         logger.info(f"Found {len(citations)} unqualified eLife→eLife citations")
         return citations
-    
+
     def store_impact_analysis(self, article_id: str, analysis_dict: Dict) -> None:
         """
         Store Workflow 5 impact analysis results in Neo4j.

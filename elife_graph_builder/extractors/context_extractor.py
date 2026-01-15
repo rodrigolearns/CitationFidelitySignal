@@ -96,10 +96,13 @@ class CitationContextExtractor:
         if not sentences:
             return None
         
+        # Extract the in-text citation text (e.g., "Smith et al., 2020")
+        in_text_citation = self._extract_text(xref).strip()
+        
         # Find which sentence contains the citation
         citation_sentence_idx = self._find_citation_sentence(
             sentences, 
-            self._extract_text(xref)
+            in_text_citation
         )
         
         if citation_sentence_idx is None:
@@ -116,7 +119,8 @@ class CitationContextExtractor:
             target_article_id,
             ref_id,
             section,
-            instance_id
+            instance_id,
+            in_text_citation
         )
         
         return context
@@ -131,17 +135,50 @@ class CitationContextExtractor:
         return None
     
     def _get_section_name(self, xref: etree.Element) -> str:
-        """Get the section title containing this xref."""
+        """Get the main section (Introduction, Methods, Results, Discussion) containing this xref."""
+        # Find all parent sections (from innermost to outermost)
+        sections = []
         current = xref
         while current is not None:
             if current.tag == 'sec':
-                # Look for title element
-                title_elem = current.find('.//title')
+                title_elem = current.find('./title')  # Direct child only
                 if title_elem is not None:
-                    return self._extract_text(title_elem)
-                return "Unknown Section"
+                    sections.append(self._extract_text(title_elem))
             current = current.getparent()
-        return "Unknown Section"
+        
+        # Try to find a main section by checking from outermost to innermost
+        # This handles cases where the structure is Main > Sub > SubSub
+        for section_title in reversed(sections):
+            normalized = self._normalize_section_name(section_title)
+            # If normalization returned a standard section (not the original title), use it
+            if normalized in ['Introduction', 'Methods', 'Results', 'Discussion', 'Abstract']:
+                return normalized
+        
+        # If no standard section found, return the outermost section or Unknown
+        if sections:
+            return self._normalize_section_name(sections[-1])
+        return "Unknown"
+    
+    def _normalize_section_name(self, section_title: str) -> str:
+        """Normalize section titles to standard categories."""
+        section_lower = section_title.lower()
+        
+        # Map to standard sections
+        if 'introduction' in section_lower or 'background' in section_lower:
+            return 'Introduction'
+        elif 'method' in section_lower or 'material' in section_lower or 'experimental' in section_lower:
+            return 'Methods'
+        elif 'result' in section_lower or 'finding' in section_lower:
+            return 'Results'
+        elif 'discussion' in section_lower or 'conclusion' in section_lower:
+            return 'Discussion'
+        elif 'abstract' in section_lower:
+            return 'Abstract'
+        elif 'reference' in section_lower or 'bibliograph' in section_lower:
+            return 'References'
+        else:
+            # Return the original title if it doesn't match standard sections
+            return section_title
     
     def _extract_paragraph_text(self, paragraph: etree.Element) -> str:
         """Extract all text from a paragraph, preserving inline citations."""
@@ -207,7 +244,8 @@ class CitationContextExtractor:
         target_article_id: str,
         ref_id: str,
         section: str,
-        instance_id: int
+        instance_id: int,
+        in_text_citation: str = ""
     ) -> CitationContext:
         """Build a CitationContext with 4-sentence window."""
         
@@ -231,6 +269,7 @@ class CitationContextExtractor:
             target_article_id=target_article_id,
             ref_id=ref_id,
             section=section,
+            in_text_citation=in_text_citation,
             sentence_before_2=sent_before_2,
             sentence_before_1=sent_before_1,
             citation_sentence=citation_sent,
