@@ -21,12 +21,6 @@ import {
   List,
   ListItem,
   ListItemText,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
 } from '@mui/material'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore'
@@ -206,73 +200,6 @@ export default function ProblematicPaperDetail() {
     return Array.from(uniquePapers.values())
   }
 
-  // Build section table data with severity counts
-  const buildSectionTableData = () => {
-    if (!impactAnalysis?.phase_b_analysis?.pattern_analysis) return []
-    
-    const patternAnalysis = impactAnalysis.phase_b_analysis.pattern_analysis
-    const sectionDistribution = patternAnalysis.section_distribution || {}
-    const severityAssessment = patternAnalysis.severity_assessment || {}
-    
-    // Group citations by section and severity
-    const sectionData = {}
-    
-    // Initialize sections from distribution
-    Object.entries(sectionDistribution).forEach(([section, count]) => {
-      if (section !== 'Unknown') {  // Skip Unknown from distribution
-        sectionData[section] = {
-          section,
-          total: count,
-          high: 0,
-          moderate: 0,
-          low: 0
-        }
-      }
-    })
-    
-    // Count severity by section
-    const countBySection = (citations, severity) => {
-      if (!citations || !Array.isArray(citations)) return
-      citations.forEach(citation => {
-        // Get section from citation data (now enriched from backend)
-        const section = citation.section || 'Unknown'
-        if (section === 'Unknown') return  // Skip unknown sections
-        
-        if (!sectionData[section]) {
-          sectionData[section] = {
-            section,
-            total: 0,
-            high: 0,
-            moderate: 0,
-            low: 0
-          }
-        }
-        sectionData[section][severity]++
-        // Update total if needed
-        if (sectionData[section].total === 0) {
-          sectionData[section].total = 1
-        }
-      })
-    }
-    
-    countBySection(severityAssessment.high_impact_citations, 'high')
-    countBySection(severityAssessment.moderate_impact_citations, 'moderate')
-    countBySection(severityAssessment.low_impact_citations, 'low')
-    
-    // Convert to array and sort by section order
-    const sectionOrder = ['Introduction', 'Methods', 'Results', 'Discussion']
-    return Object.values(sectionData)
-      .filter(s => s.section !== 'Unknown')  // Filter out Unknown sections
-      .sort((a, b) => {
-        const aIndex = sectionOrder.indexOf(a.section)
-        const bIndex = sectionOrder.indexOf(b.section)
-        if (aIndex !== -1 && bIndex !== -1) return aIndex - bIndex
-        if (aIndex !== -1) return -1
-        if (bIndex !== -1) return 1
-        return a.section.localeCompare(b.section)
-      })
-  }
-
   if (loading) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
@@ -449,79 +376,56 @@ export default function ProblematicPaperDetail() {
 
             {/* Pattern Analysis */}
             {impactAnalysis.phase_b_analysis?.pattern_analysis && (
-              <Accordion defaultExpanded>
+              <Accordion>
                 <AccordionSummary expandIcon={<ExpandMoreIcon />}>
                   <Typography variant="h6">🔍 Pattern Analysis</Typography>
                 </AccordionSummary>
                 <AccordionDetails>
-                  <TableContainer>
-                    <Table size="small">
-                      <TableHead>
-                        <TableRow>
-                          <TableCell><strong>Citation Location</strong></TableCell>
-                          <TableCell align="center"><strong>Investigated Citations</strong></TableCell>
-                          <TableCell><strong>Severity Assessment</strong></TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {buildSectionTableData().map((row) => (
-                          <TableRow key={row.section} hover>
-                            <TableCell>{row.section}</TableCell>
-                            <TableCell align="center">{row.total}</TableCell>
-                            <TableCell>
-                              <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                {row.high > 0 && (
-                                  <Chip
-                                    label={`High: ${row.high}`}
-                                    color="error"
-                                    size="small"
-                                    sx={{ minWidth: '80px' }}
-                                  />
-                                )}
-                                {row.moderate > 0 && (
-                                  <Chip
-                                    label={`Moderate: ${row.moderate}`}
-                                    color="warning"
-                                    size="small"
-                                    sx={{ minWidth: '110px' }}
-                                  />
-                                )}
-                                {row.low > 0 && (
-                                  <Chip
-                                    label={`Low: ${row.low}`}
-                                    color="success"
-                                    size="small"
-                                    sx={{ minWidth: '70px' }}
-                                  />
-                                )}
-                                {row.high === 0 && row.moderate === 0 && row.low === 0 && (
-                                  <Typography variant="caption" color="text.secondary">
-                                    No severity data
-                                  </Typography>
-                                )}
-                              </Box>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                  
-                  {/* Legend */}
-                  <Box sx={{ mt: 2, p: 1.5, bgcolor: 'grey.50', borderRadius: 1 }}>
-                    <Typography variant="caption" color="text.secondary" display="block" gutterBottom>
-                      <strong>Severity Definitions:</strong>
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      • <strong>High:</strong> Significantly affects main findings or conclusions
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      • <strong>Moderate:</strong> Affects supporting evidence or secondary claims
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      • <strong>Low:</strong> Background/contextual issues with minimal impact
-                    </Typography>
-                  </Box>
+                  <Grid container spacing={2}>
+                    {/* Section Distribution */}
+                    {impactAnalysis.phase_b_analysis.pattern_analysis.section_distribution && (
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                          Section Distribution
+                        </Typography>
+                        <List dense>
+                          {Object.entries(impactAnalysis.phase_b_analysis.pattern_analysis.section_distribution).map(([section, count]) => (
+                            <ListItem key={section}>
+                              <ListItemText
+                                primary={`${section}: ${count} citations`}
+                              />
+                            </ListItem>
+                          ))}
+                        </List>
+                      </Grid>
+                    )}
+
+                    {/* Severity Assessment */}
+                    {impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment && (
+                      <Grid item xs={12}>
+                        <Typography variant="subtitle2" fontWeight="bold" gutterBottom>
+                          Severity Assessment
+                        </Typography>
+                        <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+                          <Chip
+                            label={`High: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.high_impact_citations?.length || 0}`}
+                            color="error"
+                            size="small"
+                          />
+                          <Chip
+                            label={`Moderate: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.moderate_impact_citations?.length || 0}`}
+                            color="warning"
+                            size="small"
+                          />
+                          <Chip
+                            label={`Low: ${impactAnalysis.phase_b_analysis.pattern_analysis.severity_assessment.low_impact_citations?.length || 0}`}
+                            color="success"
+                            size="small"
+                          />
+                        </Box>
+                      </Grid>
+                    )}
+                  </Grid>
                 </AccordionDetails>
               </Accordion>
             )}

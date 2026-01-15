@@ -498,131 +498,15 @@ CitationFidelitySignal/
 
 ## 🔮 Future Developments
 
-### Priority Improvements
+For detailed improvement plans, roadmap, and research questions, see **[ENHANCEMENT.md](ENHANCEMENT.md)**.
 
-#### 1. **Workflow 2: Classification Granularity** 🎯
-**Problem**: Most citations are classified as `NOT_SUBSTANTIATE`, limiting analytical value and making it difficult to distinguish between different types of citation issues.
+**Current Focus**: Enhanced metadata extraction from XML (section types, context types, reference metadata, etc.)
 
-**Solutions**:
-- [ ] Expand classification schema with more specific categories:
-  - `INCOMPLETE_SUPPORT` - Reference partially supports the claim but lacks key details
-  - `OVERSTATED_CLAIM` - Citing paper extrapolates beyond what reference actually shows
-  - `CONTEXT_MISMATCH` - Reference discusses the topic but in a different context
-  - `METHODOLOGICAL_MISMATCH` - Reference uses different methods/conditions
-  - `CHERRY_PICKED` - Citing paper selects favorable results while ignoring contradictory findings
-  - `MISSING_CAVEATS` - Citing paper omits important limitations/qualifications from reference
-- [ ] Refine LLM prompts to guide more nuanced classification
-- [ ] Add confidence thresholds to prevent over-classification into generic categories
-- [ ] Include examples of each category in prompts to improve LLM accuracy
-
-#### 2. **In-Text Citation Display** 📝
-**Problem**: Citations displayed as "Citation #1", "Citation #2" makes analysis difficult, especially when papers cite the same reference multiple times.
-
-**Solutions**:
-- [ ] Display citations using proper in-text format throughout UI:
-  - **Problematic Papers List**: Show "Smith et al., 2020" instead of "Citation #1"
-  - **Phase A Assessments**: Use author-year format for each citation instance
-  - **Citation Details**: Include formatted citation in headers
-- [ ] Backend: Extract and store in-text citation format during parsing:
-  - Parse `<xref>` tags to extract citation text
-  - Generate author-year format from reference metadata
-  - Store as `in_text_citation` field in Neo4j
-- [ ] Frontend: Update display logic to use formatted citations
-- [ ] Add tooltip showing full reference when hovering over in-text citation
-
-#### 3. **User Annotations & Notes** 💬
-**Problem**: Notes/comments in early workflows (Workflow 2-3) are not useful; manual review should focus on problematic papers after Workflow 5.
-
-**Solutions**:
-- [ ] Remove note-taking features from Workflow 2/3 citation lists
-- [ ] Add comprehensive annotation system to Problematic Paper Detail page:
-  - Per-citation notes visible in context
-  - Paper-level notes for overall assessment
-  - Severity override capability (upgrade/downgrade High/Moderate/Low)
-  - Flag for "requires expert review"
-  - Link to related citations within same paper
-- [ ] Store annotations in Neo4j with timestamp and user tracking
-- [ ] Export annotations with Workflow 5 reports for external review
-
-#### 4. **Phase A: Citation Impact Assessment Depth** 🔬
-**Problem**: Phase A assessments often conclude "discussion questionable, but results valid" without analyzing whether the citing paper's methodology, assumptions, or arguments actually depend on the miscited reference.
-
-**Solutions**:
-- [ ] Refine Phase A prompt to trace citation dependencies:
-  - **Methodological Dependencies**: "Did the citing paper justify their methods based on this reference?"
-  - **Assumption Dependencies**: "Does the citing paper's rationale rely on claims from this reference?"
-  - **Interpretive Dependencies**: "Are the citing paper's conclusions drawn by building on this reference?"
-  - **Data Dependencies**: "Does the citing paper compare their results against this reference's data?"
-- [ ] Add structured impact analysis fields:
-  - `affects_methods`: Boolean + explanation
-  - `affects_assumptions`: Boolean + explanation
-  - `affects_interpretation`: Boolean + explanation
-  - `undermined_claims`: List of specific claims/arguments put into question
-- [ ] Update Phase B synthesis to aggregate these dependency impacts:
-  - Clearly state which specific arguments/claims are undermined
-  - Avoid generic statements like "results remain valid"
-  - Provide evidence-based assessment of what can/cannot be trusted
-
-**Example Output**: 
-> "The citing paper's choice of treatment protocol (Methods, para 3) was justified by claiming that Reference X demonstrated 70% efficacy. However, Reference X does not report this efficacy rate. This undermines the methodological rationale, though the experimental execution itself remains sound. Readers should question why this specific protocol was chosen over alternatives."
-
-#### 5. **Problematic Paper Analysis: Enhanced Citation Context** 📊
-**Problem**: Problematic citations list lacks sufficient context for meaningful analysis.
-
-**Solutions**:
-- [ ] Add to each citation entry:
-  - **In-text citation format** (e.g., "Smith et al., 2020")
-  - **Section location** (Introduction/Methods/Results/Discussion)
-  - **Paragraph number** within section
-  - **Citation role** (background, methodological justification, comparative data, etc.)
-  - **Severity indicator** (High/Moderate/Low impact badge)
-  - **Quick summary** (1-sentence explanation of the issue)
-- [ ] Group citations by:
-  - Reference paper (show all instances of citing same paper)
-  - Section (Introduction citations vs. Methods citations)
-  - Severity (High impact citations first)
-- [ ] Add filtering and sorting options
-- [ ] Include "View in context" link to see full paragraph
-
-#### 6. **Classification Schema Refinement** 🏷️
-**Current Issue**: Over-reliance on generic categories reduces system utility.
-
-**Action Items**:
-- [ ] Conduct classification distribution analysis on processed corpus
-- [ ] Identify patterns in miscategorized citations through manual review
-- [ ] A/B test alternative prompt formulations
-- [ ] Add few-shot examples to prompts for edge cases
-- [ ] Implement confidence calibration for borderline classifications
-- [ ] Consider hierarchical classification (primary + secondary tags)
-
----
-
-## 🔮 Future Work
-
-This project is a proof-of-concept with significant room for growth:
-
-### Planned Analytics
-- [ ] **Total Citation Count**: Number of eLife→eLife citations discovered
-- [ ] **Classification Distribution**: Breakdown by category (SUPPORT, CONTRADICT, etc.)
-- [ ] **Manual Review Statistics**: Percentage of citations manually reviewed
-- [ ] **Agreement Analysis**: LLM vs. human reviewer alignment rates
-- [ ] **Citation Propagation Maps**: Visualize how miscitations spread through networks
-
-### Expansion Goals
-- [ ] **Multi-Publisher Support**: Extend beyond eLife to PubMed, arXiv, bioRxiv
-- [ ] **PDF Processing**: Handle papers without structured XML
-- [ ] **User Submission Portal**: Allow researchers to submit their DOI/PDF
-- [ ] **Automated Citation Discovery**: Find all papers citing a given work
-- [ ] **Citation Quality Dashboard**: Show citation health for any paper
-- [ ] **API Service**: Programmatic access to citation assessments
-- [ ] **Citation Propagation Analysis**: Track how errors spread through citation chains
-
-### Research Questions
-- **How common are low-fidelity citations in scientific literature?**
-- **Do certain fields or topics have higher rates of miscitation?**
-- **Can we predict which citations are likely to be problematic?**
-- **How do miscitations propagate through citation networks?**
-- **What interventions can improve citation accuracy?**
+**Upcoming Priorities**:
+- Classification schema refinement
+- In-text citation display improvements
+- User annotation system
+- Phase A impact assessment depth
 
 ---
 

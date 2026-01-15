@@ -1,0 +1,41 @@
+{
+  "total_articles": 2100,
+  "total_citations": 1692,
+  "citing_articles": 658,
+  "referenced_only_articles": 1438,
+  "qualified_citations": 1688,
+  "total_contexts": 4326,
+  "classification_distribution": {
+    "NOT_SUBSTANTIATE": 1245,
+    "SUPPORT": 2920,
+    "OVERSIMPLIFY": 34,
+    "IRRELEVANT": 74,
+    "CONTRADICT": 41
+  },
+  "citation_type_distribution": {
+    "BACKGROUND": 776,
+    "METHODOLOGICAL": 1395,
+    "CONCEPTUAL": 2117,
+    "ATTRIBUTION": 26
+  },
+  "avg_confidence": 0.8802967083912733,
+  "determination_distribution": {
+    "CONFIRMED": 517,
+    "CORRECTED": 248
+  },
+  "recommendation_distribution": {
+    "NEEDS_REVIEW": 306,
+    "MISREPRESENTATION": 287,
+    "ACCURATE": 172
+  },
+  "second_round_categories": {
+    "NOT_SUBSTANTIATE": 492,
+    "OVERSIMPLIFY": 47,
+    "SUPPORT": 172,
+    "MISQUOTE": 13,
+    "CONTRADICT": 21,
+    "IRRELEVANT": 19,
+    "MISREPRESENTATION": 1
+  },
+  "second_round_total": 765
+}

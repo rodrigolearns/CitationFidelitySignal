@@ -1,0 +1,4 @@
+Commit: 087bdefe4399a06f894d292ff7cb1a0be87c288c
+Author: Rodrigo Rosas
+Date: Thu Jan 15 13:51:33 2026 +0100
+Message: worked for 1000 papers. working on several funcitonal and aesthetic improvements in prep for another run of 5000 papers
