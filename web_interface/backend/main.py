@@ -276,6 +276,221 @@ async def analyze_problematic_paper(article_id: str):
         raise HTTPException(status_code=500, detail=f"Analysis failed: {error_msg}")
 
 
+@app.post("/api/problematic-paper/{article_id}/neo-analyze")
+async def neo_analyze_problematic_paper(article_id: str):
+    """
+    Trigger NEO Workflow 5: Reference-Centric Impact Assessment.
+    
+    This is a long-running operation that performs:
+    - Phase A: Per-reference deep analysis (groups citations by reference paper)
+    - Phase B: Cumulative assessment and synthesis
+    
+    Args:
+        article_id: Article ID to analyze
+    
+    Returns:
+        NEO impact analysis with classification and per-reference reports
+    """
+    try:
+        import aiohttp
+        import json
+        from pathlib import Path
+        
+        # Import NeoImpactAnalyzer
+        from elife_graph_builder.analyzers.neo_impact_analyzer import NeoImpactAnalyzer
+        
+        # Check if XML exists (same logic as regular workflow 5)
+        samples_dir = Config.SAMPLES_DIR
+        xml_found = False
+        
+        print(f"🔍 [NEO] Checking for cached XML for article {article_id}...")
+        
+        # Check for versioned XMLs
+        for version in [6, 5, 4, 3, 2, 1]:
+            versioned_xml = samples_dir / f"elife-{article_id}-v{version}.xml"
+            if versioned_xml.exists():
+                expected_xml = samples_dir / f"elife-{article_id}.xml"
+                if not expected_xml.exists():
+                    import shutil
+                    shutil.copy(versioned_xml, expected_xml)
+                    print(f"✅ [NEO] Using cached v{version}")
+                xml_found = True
+                break
+        
+        # Download if needed
+        if not xml_found:
+            expected_xml = samples_dir / f"elife-{article_id}.xml"
+            if not expected_xml.exists():
+                print(f"📥 [NEO] Downloading from GitHub...")
+                
+                downloaded = False
+                for version in [6, 5, 4, 3, 2, 1]:
+                    url = f"https://raw.githubusercontent.com/elifesciences/elife-article-xml/master/articles/elife-{article_id}-v{version}.xml"
+                    print(f"  Trying v{version}...")
+                    
+                    try:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                                if response.status == 200:
+                                    content = await response.read()
+                                    content_str = content.decode('utf-8', errors='ignore')
+                                    if '<body>' in content_str or '<back>' in content_str:
+                                        samples_dir.mkdir(parents=True, exist_ok=True)
+                                        expected_xml.write_bytes(content)
+                                        print(f"✅ [NEO] Downloaded v{version} successfully")
+                                        downloaded = True
+                                        break
+                                elif response.status == 404:
+                                    print(f"  v{version} not found (404)")
+                                else:
+                                    print(f"  v{version} returned HTTP {response.status}")
+                    except Exception as e:
+                        print(f"  v{version} error: {e}")
+                        continue
+                
+                if not downloaded:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Could not download XML for article {article_id}"
+                    )
+        
+        # Fetch citation contexts from Neo4j
+        print(f"📊 [NEO] Fetching citation contexts...")
+        contexts = []
+        
+        with neo4j_client.driver.session() as session:
+            result = session.run("""
+                MATCH (source:Article {article_id: $article_id})-[c:CITES]->(target:Article)
+                WHERE c.citation_contexts_json IS NOT NULL
+                RETURN target.article_id as target_id,
+                       target.title as target_title,
+                       target.authors as target_authors,
+                       target.pub_year as target_year,
+                       c.citation_contexts_json as contexts_json,
+                       c.qualified as is_suspicious
+            """, article_id=article_id)
+            
+            for record in result:
+                contexts_data = json.loads(record['contexts_json']) if record['contexts_json'] else []
+                
+                for ctx_data in contexts_data:
+                    classification_info = ctx_data.get('classification', {})
+                    if isinstance(classification_info, dict):
+                        classification_category = classification_info.get('category', 'UNKNOWN')
+                        classification_reasoning = classification_info.get('justification', '')
+                    else:
+                        classification_category = 'UNKNOWN'
+                        classification_reasoning = ''
+                    
+                    # Map to concern levels
+                    if classification_category in ['CONTRADICT', 'MISQUOTE']:
+                        mapped_classification = 'HIGH_CONCERN'
+                    elif classification_category in ['NOT_SUBSTANTIATE', 'OVERSIMPLIFY']:
+                        mapped_classification = 'MODERATE_CONCERN'
+                    elif classification_category == 'LEGITIMATE':
+                        mapped_classification = 'FALSE_ALARM'
+                    else:
+                        mapped_classification = 'MINOR_CONCERN'
+                    
+                    context = {
+                        'citing_article_id': article_id,
+                        'target_article_id': record['target_id'],
+                        'section_name': ctx_data.get('section_name', 'Unknown'),
+                        'context_text': ctx_data.get('context_text', ''),
+                        'in_text_citation': ctx_data.get('in_text_citation', ''),
+                        'target_authors': record['target_authors'] or [],
+                        'target_year': record['target_year'],
+                        'classification': mapped_classification,
+                        'reasoning': classification_reasoning,
+                        'evidence_passages': ctx_data.get('evidence_passages', [])
+                    }
+                    contexts.append(context)
+        
+        print(f"📊 [NEO] Found {len(contexts)} citation contexts")
+        
+        if not contexts:
+            raise HTTPException(
+                status_code=400,
+                detail="No citation contexts found for this paper"
+            )
+        
+        # Run NEO analysis
+        print(f"🎯 [NEO] Starting reference-centric analysis...")
+        
+        xml_path = samples_dir / f"elife-{article_id}.xml"
+        analyzer = NeoImpactAnalyzer(provider='deepseek', model='deepseek-reasoner')
+        
+        # Run in thread pool to avoid blocking
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor() as pool:
+            result = await loop.run_in_executor(
+                pool,
+                analyzer.run_neo_analysis,
+                article_id,
+                xml_path,
+                contexts
+            )
+        
+        # Save to Neo4j
+        print(f"💾 [NEO] Saving results...")
+        success = neo4j_client.save_neo_impact_analysis(article_id, result)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to save NEO analysis")
+        
+        print(f"✅ [NEO] Analysis complete!")
+        
+        return {
+            "success": True,
+            "article_id": article_id,
+            "classification": result['synthesis'].get('overall_classification', 'UNKNOWN'),
+            "analysis": result
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print("=" * 80)
+        print("❌ NEO WORKFLOW 5 ERROR:")
+        print(error_detail)
+        print("=" * 80)
+        
+        error_msg = str(e)
+        if not error_msg or len(error_msg) < 50:
+            error_msg = f"{str(e)}\n\nFull trace: {error_detail[-500:]}"
+        
+        raise HTTPException(status_code=500, detail=f"NEO Analysis failed: {error_msg}")
+
+
+@app.put("/api/problematic-paper/{article_id}/neo-notes")
+async def update_neo_reviewer_notes(article_id: str, notes: dict):
+    """
+    Update reviewer notes for NEO analysis.
+    
+    Args:
+        article_id: Article ID
+        notes: dict with 'notes' field containing reviewer notes text
+    
+    Returns:
+        Success status
+    """
+    try:
+        notes_text = notes.get('notes', '')
+        success = neo4j_client.update_neo_reviewer_notes(article_id, notes_text)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.put("/api/citations/{source_id}/{target_id}/review-status")
 async def update_review_status(source_id: str, target_id: str, reviewed: bool):
     """

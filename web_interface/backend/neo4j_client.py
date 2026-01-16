@@ -513,7 +513,7 @@ class Neo4jClient:
             Dict with paper metadata, all citations, and impact analysis (if available)
         """
         with self.driver.session() as session:
-            # Get paper metadata
+            # Get paper metadata (including both classic and NEO analyses)
             result = session.run("""
                 MATCH (a:Article {article_id: $article_id})
                 RETURN a.title as title,
@@ -522,7 +522,11 @@ class Neo4jClient:
                        a.pub_year as pub_year,
                        a.impact_analysis_json as impact_analysis,
                        a.impact_classification as impact_classification,
-                       a.analyzed_at as analyzed_at
+                       a.analyzed_at as analyzed_at,
+                       a.neo_impact_analysis_json as neo_impact_analysis,
+                       a.neo_impact_classification as neo_impact_classification,
+                       a.neo_analyzed_at as neo_analyzed_at,
+                       a.neo_reviewer_notes as neo_reviewer_notes
             """, article_id=article_id)
             
             record = result.single()
@@ -535,9 +539,15 @@ class Neo4jClient:
                 'doi': record['doi'],
                 'authors': record['authors'] or [],
                 'pub_year': record['pub_year'],
+                # Classic Workflow 5
                 'impact_analysis': json.loads(record['impact_analysis']) if record['impact_analysis'] else None,
                 'impact_classification': record['impact_classification'],
-                'analyzed_at': record['analyzed_at']
+                'analyzed_at': record['analyzed_at'],
+                # NEO Workflow 5
+                'neo_impact_analysis': json.loads(record['neo_impact_analysis']) if record['neo_impact_analysis'] else None,
+                'neo_impact_classification': record['neo_impact_classification'],
+                'neo_analyzed_at': record['neo_analyzed_at'],
+                'neo_reviewer_notes': record.get('neo_reviewer_notes', '')
             }
             
             # Get all problematic citations
@@ -612,6 +622,57 @@ class Neo4jClient:
                 timestamp=datetime.now().isoformat()
             )
             
+            return True
+    
+    def save_neo_impact_analysis(self, article_id: str, analysis: dict) -> bool:
+        """
+        Store NeoWorkflow 5 impact analysis results in Neo4j (separate from classic).
+        
+        Args:
+            article_id: Article ID
+            analysis: NEO analysis dict with reference_analyses and synthesis
+        
+        Returns:
+            True if successful
+        """
+        with self.driver.session() as session:
+            from datetime import datetime
+            
+            session.run("""
+                MATCH (a:Article {article_id: $article_id})
+                SET a.neo_impact_analysis_json = $analysis_json,
+                    a.neo_impact_classification = $classification,
+                    a.neo_analyzed_at = datetime($timestamp),
+                    a.neo_reviewer_notes = COALESCE(a.neo_reviewer_notes, $default_notes)
+            """,
+                article_id=article_id,
+                analysis_json=json.dumps(analysis),
+                classification=analysis.get('synthesis', {}).get('overall_classification', 'NOT_PERFORMED'),
+                timestamp=datetime.now().isoformat(),
+                default_notes=""
+            )
+            
+            return True
+    
+    def update_neo_reviewer_notes(self, article_id: str, notes: str) -> bool:
+        """
+        Update reviewer notes for NEO analysis.
+        
+        Args:
+            article_id: Article ID
+            notes: Reviewer notes text
+        
+        Returns:
+            True if successful
+        """
+        with self.driver.session() as session:
+            session.run("""
+                MATCH (a:Article {article_id: $article_id})
+                SET a.neo_reviewer_notes = $notes
+            """,
+                article_id=article_id,
+                notes=notes
+            )
             return True
     
     def get_papers_needing_analysis(self, limit: int = 10) -> List[str]:
